@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapehawk — scoreboard</title>
+<style>
+  :root {
+    --bg:#0B0D10; --surface:#12161B; --surface-2:#181D24; --line:#232A33;
+    --ink:#E8EAED; --muted:#8B94A0; --faint:#5A626C;
+    --accent:#FFB020; --good:#3FBF5F; --bad:#F04A4A;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+         font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  a { color:inherit; }
+  header { position:sticky; top:0; z-index:20; background:rgba(11,13,16,.94);
+           backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+           padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
+  .brand span { color:var(--accent); }
+  .tabs { display:flex; gap:4px; }
+  .tab { font-size:13px; padding:6px 13px; border-radius:7px; text-decoration:none;
+         color:var(--muted); border:1px solid transparent; }
+  .tab:hover { color:var(--ink); }
+  .tab.on { background:var(--surface-2); border-color:var(--line); color:var(--accent);
+            font-weight:600; }
+  .spacer { flex:1; }
+  select { background:var(--surface-2); color:var(--ink); border:1px solid var(--line);
+           border-radius:7px; padding:6px 9px; font-size:13px; }
+
+  .wrap { max-width:1100px; margin:0 auto; padding:18px 16px 40px; }
+  .lede { color:var(--muted); font-size:13.5px; max-width:74ch; margin:0 0 6px; }
+  .lede b { color:var(--ink); }
+  .caveat { color:var(--faint); font-size:12.5px; max-width:74ch; margin:0 0 20px;
+            border-left:2px solid var(--line); padding-left:11px; }
+
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:11px;
+           margin-bottom:16px; }
+  .panel > h2 { margin:0; padding:11px 14px; font-size:12px; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--muted); border-bottom:1px solid var(--line); }
+  .pad { padding:14px; }
+
+  .hero { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .stat { background:var(--surface-2); border:1px solid var(--line); border-radius:9px;
+          padding:12px 13px; }
+  .stat .k { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+             color:var(--faint); }
+  .stat .v { font-family:var(--mono); font-size:25px; font-weight:700; margin-top:3px; }
+  .stat .n { font-size:11.5px; color:var(--faint); margin-top:2px; }
+
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+       color:var(--faint); font-weight:600; padding:8px 14px; border-bottom:1px solid var(--line); }
+  td { padding:8px 14px; border-bottom:1px solid var(--line); }
+  tr:last-child td { border-bottom:0; }
+  td.num { font-family:var(--mono); text-align:right; }
+  .up { color:var(--good); } .down { color:var(--bad); } .dim { color:var(--faint); }
+  .thin { color:var(--faint); font-style:italic; }
+  .scroll { overflow-x:auto; }
+  .empty { padding:24px 16px; color:var(--muted); }
+  .hl { max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        display:block; }
+  .badge { font-size:10.5px; font-weight:700; padding:2px 6px; border-radius:4px;
+           text-transform:uppercase; }
+  .badge.positive { background:rgba(63,191,95,.16); color:var(--good); }
+  .badge.negative { background:rgba(240,74,74,.16); color:var(--bad); }
+  .badge.unclear { background:var(--surface-2); color:var(--muted); }
+  @media (max-width:640px){ .hl { max-width:210px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">TAPEHAWK<span>.</span></div>
+  <nav class="tabs">
+    <a class="tab" href="/">Live</a>
+    <a class="tab on" href="/scoreboard">Scoreboard</a>
+  </nav>
+  <div class="spacer"></div>
+  <select id="days">
+    <option value="7">Last 7 days</option>
+    <option value="30" selected>Last 30 days</option>
+    <option value="90">Last 90 days</option>
+    <option value="365">All time</option>
+  </select>
+</header>
+
+<div class="wrap">
+  <p class="lede">Every headline this site receives gets checked against what the
+  stock <b>actually did</b> in the hour afterwards. This page is the result —
+  including the calls that were wrong.</p>
+  <p class="caveat">Read the sample size next to every number. A hit rate over
+  five headlines is not a hit rate. Moves are measured from the open of the
+  first 5-minute bar at or after the headline, so the reaction is not counted
+  before it could have been acted on. Headlines arriving outside market hours
+  can't be measured and are excluded rather than counted as zero.</p>
+
+  <div id="body"><div class="empty">Loading…</div></div>
+</div>
+
+<script>
+(function(){
+  var body=document.getElementById('body'), days=document.getElementById('days');
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function pc(v,dp){ return (v==null||isNaN(v))?'—':(+v).toFixed(dp==null?2:dp)+'%'; }
+  function signed(v){ if(v==null||isNaN(v))return '<span class="dim">—</span>';
+    var n=+v; return '<span class="'+(n>0?'up':(n<0?'down':''))+'">'+
+      (n>0?'+':'')+n.toFixed(2)+'%</span>'; }
+  function when(iso){ var t=Date.parse(iso); return t?new Date(t).toLocaleString([], 
+    {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''; }
+  // A number computed from a handful of samples is not evidence. Say so
+  // inline rather than letting a 100% on n=3 look like a track record.
+  function thin(n){ return n<10 ? ' <span class="thin">(too few to trust)</span>' : ''; }
+
+  function statRow(s){
+    if(!s) return '<div class="empty">Nothing graded in this window yet.</div>';
+    return '<div class="hero">'+
+      '<div class="stat"><div class="k">Median move</div><div class="v">'+pc(s.median_abs_move)+
+        '</div><div class="n">in the hour after, absolute</div></div>'+
+      '<div class="stat"><div class="k">Moved over 2%</div><div class="v">'+pc(s.moved_over_2pct,0)+
+        '</div><div class="n">share of headlines</div></div>'+
+      '<div class="stat"><div class="k">Went up</div><div class="v">'+pc(s.pct_up,0)+
+        '</div><div class="n">50% = a coin flip</div></div>'+
+      '<div class="stat"><div class="k">Sample</div><div class="v">'+s.n+
+        '</div><div class="n">headlines graded</div></div>'+
+    '</div>';
+  }
+
+  function breakdown(title, obj, labelMap, note){
+    var keys=Object.keys(obj||{}).filter(function(k){return obj[k];});
+    if(!keys.length) return '';
+    var rows=keys.map(function(k){
+      var s=obj[k];
+      return '<tr><td>'+esc((labelMap&&labelMap[k])||k)+thin(s.n)+'</td>'+
+        '<td class="num">'+s.n+'</td>'+
+        '<td class="num">'+pc(s.median_abs_move)+'</td>'+
+        '<td class="num">'+pc(s.moved_over_2pct,0)+'</td>'+
+        '<td class="num">'+pc(s.pct_up,0)+'</td></tr>';
+    }).join('');
+    return '<section class="panel"><h2>'+esc(title)+'</h2>'+
+      (note?'<div class="pad" style="padding-bottom:0"><p class="caveat" style="margin:0 0 6px">'+note+'</p></div>':'')+
+      '<div class="scroll"><table><thead><tr><th>'+esc(title)+'</th><th class="num">N</th>'+
+      '<th class="num">Median move</th><th class="num">Over 2%</th>'+
+      '<th class="num">Went up</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>';
+  }
+
+  function render(d){
+    if(d.error){ body.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
+    var parts=[];
+    parts.push('<section class="panel"><h2>All graded headlines</h2><div class="pad">'+
+      statRow(d.overall)+'</div></section>');
+    if(d.big_news) parts.push('<section class="panel"><h2>Big News only</h2><div class="pad">'+
+      statRow(d.big_news)+'</div></section>');
+
+    parts.push(breakdown('Impact call', d.by_impact,
+      {high:'Likely a big mover', medium:'Should move the stock',
+       low:'Probably a small move', unrated:'No impact call'},
+      'This is the site marking its own homework. If "Likely a big mover" does '+
+      'not show a bigger median move than "Probably a small move", the impact '+
+      'labels are not earning their place and should be dropped.'));
+
+    parts.push(breakdown('Direction call', d.by_tone,
+      {positive:'Read as positive', negative:'Read as negative',
+       unclear:'Direction unclear'},
+      'The column that matters here is "Went up". Positive headlines should sit '+
+      'above 50% and negative below. If both hover at 50, the tone labels are '+
+      'describing language rather than outcomes.'));
+
+    parts.push(breakdown('Category', d.by_category, null));
+
+    if((d.recent||[]).length){
+      var rows=d.recent.map(function(r){
+        return '<tr><td class="dim" style="white-space:nowrap">'+esc(when(r.created_at))+'</td>'+
+          '<td><span class="hl">'+(r.url?'<a href="'+esc(r.url)+'" target="_blank" rel="noopener noreferrer">'+esc(r.headline)+'</a>':esc(r.headline))+'</span></td>'+
+          '<td style="font-family:var(--mono)">'+esc(r.symbol||'')+'</td>'+
+          '<td>'+(r.tone?'<span class="badge '+esc(r.tone)+'">'+esc(r.tone)+'</span>':'')+'</td>'+
+          '<td class="num">'+signed(r.move_15m)+'</td>'+
+          '<td class="num">'+signed(r.move_60m)+'</td></tr>';
+      }).join('');
+      parts.push('<section class="panel"><h2>Recently graded</h2><div class="scroll">'+
+        '<table><thead><tr><th>When</th><th>Headline</th><th>Ticker</th><th>Called</th>'+
+        '<th class="num">+15 min</th><th class="num">+60 min</th></tr></thead><tbody>'+
+        rows+'</tbody></table></div></section>');
+    }
+
+    parts.push('<p class="caveat">'+ (d.pending||0) +' headline(s) waiting to be graded; '+
+      (d.ungradeable||0)+' could not be measured (arrived outside market hours, or '+
+      'carried no equity ticker). Both are excluded from every number above rather '+
+      'than counted as no move.</p>');
+    body.innerHTML=parts.join('');
+  }
+
+  function load(){
+    body.innerHTML='<div class="empty">Loading…</div>';
+    fetch('/api/scoreboard?days='+encodeURIComponent(days.value))
+      .then(function(r){return r.json();}).then(render)
+      .catch(function(){ body.innerHTML='<div class="empty">Could not load the scoreboard.</div>'; });
+  }
+  days.onchange=load;
+  load();
+})();
+</script>
+</body>
+</html>

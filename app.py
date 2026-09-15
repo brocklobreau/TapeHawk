@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from flask import Flask, Response, request, send_from_directory
 
 import news_stream
+import outcomes
 import research
 import store
 
@@ -158,6 +159,24 @@ def api_lookup():
         return {"error": "Lookup failed — try again shortly."}, 502
 
 
+@app.route("/scoreboard")
+def scoreboard_page():
+    return send_from_directory(HERE, "scoreboard.html")
+
+
+@app.route("/api/scoreboard")
+def api_scoreboard():
+    try:
+        days = min(max(int(request.args.get("days", 30)), 1), 365)
+    except ValueError:
+        days = 30
+    try:
+        return store.scoreboard(days=days)
+    except Exception as e:
+        log(f"scoreboard failed: {e}")
+        return {"error": "Could not build the scoreboard."}, 500
+
+
 @app.route("/api/status")
 def api_status():
     return {"stream": news_stream.status(), "store": store.stats(),
@@ -171,6 +190,31 @@ def healthz():
 
 _started = False
 _start_lock = threading.Lock()
+
+# How often to look for headlines old enough to grade. Each pass costs at
+# most MAX_PER_RUN API calls, so this is cheap; the interval only decides how
+# quickly the backlog drains, not how much it costs.
+GRADE_INTERVAL_SECONDS = 300
+
+
+def _grader_loop():
+    # Let the stream settle before competing for anything.
+    time.sleep(45)
+    while True:
+        try:
+            outcomes.grade_pending(store, log=log)
+        except Exception as e:
+            # Grading is a reporting feature. It must never be able to take
+            # down ingest, which is the part that cannot be recovered later.
+            log(f"outcome grading failed (non-fatal): {e}")
+        time.sleep(GRADE_INTERVAL_SECONDS)
+
+
+def _start_grader():
+    if not os.environ.get("FMP_API_KEY"):
+        log("outcomes: FMP_API_KEY not set -- outcome grading disabled")
+        return
+    threading.Thread(target=_grader_loop, daemon=True, name="grader").start()
 
 
 def start_once():
@@ -194,6 +238,7 @@ def start_once():
         except Exception as e:
             log(f"importance backfill skipped: {e}")
         news_stream.start(log=log)
+        _start_grader()
         log("tapehawk: started")
 
 

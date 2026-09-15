@@ -24,6 +24,12 @@
   .brand span { color:var(--accent); }
   .live { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted);
           font-family:var(--mono); }
+  .tabs { display:flex; gap:4px; }
+  .tab { font-size:13px; padding:6px 13px; border-radius:7px; text-decoration:none;
+         color:var(--muted); border:1px solid transparent; }
+  .tab:hover { color:var(--ink); }
+  .tab.on { background:var(--surface-2); border-color:var(--line); color:var(--accent);
+            font-weight:600; }
   .dot { width:7px; height:7px; border-radius:50%; background:var(--faint); }
   .dot.on { background:var(--live); box-shadow:0 0 0 0 rgba(43,214,123,.7);
             animation:pulse 2.2s infinite; }
@@ -159,6 +165,10 @@
 <body>
 <header>
   <div class="brand">TAPEHAWK<span>.</span></div>
+  <nav class="tabs">
+    <a class="tab on" href="/">Live</a>
+    <a class="tab" href="/scoreboard">Scoreboard</a>
+  </nav>
   <div class="live"><span class="dot" id="dot"></span><span id="livetext">connecting…</span></div>
   <div class="spacer"></div>
   <div class="search">
