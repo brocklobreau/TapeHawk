@@ -88,6 +88,30 @@
 
   .bigwrap { margin-bottom:16px; }
   .bigwrap .panel { border-color:rgba(255,176,32,.42); }
+  /* Scrollable, with a VISIBLE scrollbar. Bellwether's nav hid its scrollbar
+     with scrollbar-width:none and five tabs became invisible on phones --
+     a scroll area nobody can tell is scrollable is a scroll area that hides
+     content. Thin and dim, but present. */
+  #bignews { max-height:min(46vh, 420px); overflow-y:auto; overscroll-behavior:contain;
+             scrollbar-width:thin; scrollbar-color:rgba(255,176,32,.45) transparent; }
+  #bignews::-webkit-scrollbar { width:9px; }
+  #bignews::-webkit-scrollbar-track { background:transparent; }
+  #bignews::-webkit-scrollbar-thumb { background:rgba(255,176,32,.38);
+    border-radius:99px; border:2px solid var(--surface); }
+  #bignews::-webkit-scrollbar-thumb:hover { background:rgba(255,176,32,.62); }
+  /* Chrome uses OVERLAY scrollbars: zero layout width, visible only while
+     actively scrolling. So the styled bar above cannot be the only signal
+     that there is more below -- that is how Bellwether's nav hid five tabs.
+     A fade at the bottom edge shows there is more, and disappears at the end. */
+  .bignews-wrap { position:relative; }
+  .bignews-wrap::after {
+    content:''; position:absolute; left:0; right:0; bottom:0; height:44px;
+    pointer-events:none; opacity:0; transition:opacity .18s;
+    background:linear-gradient(to bottom, rgba(18,22,27,0), var(--surface));
+    border-radius:0 0 11px 11px; }
+  .bignews-wrap.more::after { opacity:1; }
+  .count-hint { color:var(--faint); font-weight:400; font-size:11.5px; }
+  @media (max-width:980px){ #bignews { max-height:min(52vh, 360px); } }
   .bigwrap > .panel > h2 { color:var(--accent); border-bottom-color:rgba(255,176,32,.28); }
   .big-item { padding:12px 14px; border-bottom:1px solid var(--line); }
   .big-item:last-child { border-bottom:0; }
@@ -145,8 +169,8 @@
 
 <div class="bigwrap" id="bigwrap">
   <section class="panel">
-    <h2>⚡ Big news <span style="color:var(--faint);font-weight:400">— the ones that actually matter</span></h2>
-    <div id="bignews"></div>
+    <h2>⚡ Big news <span class="count-hint" id="bigcount">— the ones that actually matter</span></h2>
+    <div class="bignews-wrap" id="bignews-wrap"><div id="bignews"></div></div>
   </section>
 </div>
 
@@ -288,12 +312,19 @@
     if(!prepend) { box.innerHTML=''; bigSeen={}; }
     var ph = box.querySelector('.empty');
     if (ph && list.length) ph.remove();
+    // Preserve reading position: prepending shifts everything down, so if the
+    // user has scrolled away from the top, keep them on the item they were
+    // looking at rather than jumping them to the new one.
+    var keep = prepend && box.scrollTop > 4;
+    var before = box.scrollHeight;
     list.forEach(function(h){
       if(bigSeen[h.id]) return; bigSeen[h.id]=1;
       var el=bigRow(h);
       if(prepend) box.insertBefore(el, box.firstChild); else box.appendChild(el);
     });
-    while(box.children.length>8) box.removeChild(box.lastChild);
+    if (keep) box.scrollTop += (box.scrollHeight - before);
+    while(box.children.length>25) box.removeChild(box.lastChild);
+    updateBigAffordance();
     // Show the section with an honest empty state rather than hiding it.
     // A missing section is indistinguishable from a broken one -- the first
     // question it produced was "where is the big news section?", which is
@@ -307,8 +338,27 @@
     document.getElementById('bigwrap').hidden = false;
   }
 
+  // The fade, and the count, are the visible proof there is more to see.
+  function updateBigAffordance(){
+    var box=document.getElementById('bignews');
+    var wrap=document.getElementById('bignews-wrap');
+    var hint=document.getElementById('bigcount');
+    if(!box||!wrap) return;
+    var n=box.querySelectorAll('.big-item').length;
+    var more = box.scrollHeight - box.clientHeight - box.scrollTop > 12;
+    wrap.classList.toggle('more', more);
+    if(hint) hint.textContent = n
+      ? '· ' + n + (more ? ' — scroll for more' : '')
+      : '— the ones that actually matter';
+  }
+  (function(){
+    var box=document.getElementById('bignews');
+    if(box) box.addEventListener('scroll', updateBigAffordance, {passive:true});
+    window.addEventListener('resize', updateBigAffordance);
+  })();
+
   function loadBig(){
-    fetch('/api/feed?big=1&limit=8').then(function(r){return r.json();}).then(function(d){
+    fetch('/api/feed?big=1&limit=25').then(function(r){return r.json();}).then(function(d){
       paintBig(d.headlines||[], false);
     }).catch(function(){});
   }
