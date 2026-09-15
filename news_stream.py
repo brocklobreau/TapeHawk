@@ -164,6 +164,21 @@ def _handle(msg, log):
             _state["stored"] += 1
         else:
             _state["duplicates"] += 1
+    # Log every stored headline. At the measured ~0.8/minute this is about 48
+    # lines an hour -- trivial volume, and it is the only way to tell from
+    # outside the process whether ingest is actually working. The failure mode
+    # of this component is SILENT: if it stops, the site keeps serving old
+    # headlines and looks perfectly healthy. Without this line the first sign
+    # of trouble would be noticing the feed "seems quiet", which is
+    # indistinguishable from a genuinely quiet news day.
+    if fresh:
+        lat = f"{latency_ms / 1000:.2f}s" if latency_ms is not None else "?"
+        tags = ",".join(cats) or "-"
+        syms = ",".join(article["symbols"][:4]) or "-"
+        log(f"news [{lat}] [{tags}] [{syms}]"
+            + (" FILTERED" if noise else "")
+            + f" {headline[:96]}")
+
     # Only push genuinely new, non-filler headlines to open pages. A repeat of
     # a corrected article should not make the feed jump.
     if fresh and not noise:
@@ -193,6 +208,7 @@ def _run_once(kid, sec, log):
         # reconnect. Treating the two alike (as the first probe did) means a
         # dead socket looks exactly like a slow news day.
         ws.settimeout(40)
+        last_beat = time.time()
         while True:
             try:
                 raw = ws.recv()
@@ -200,6 +216,17 @@ def _run_once(kid, sec, log):
                 if "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower():
                     continue
                 raise
+            # Periodic proof-of-life. A quiet wire and a wedged reader look
+            # identical in the logs otherwise, and "is it broken or is it just
+            # slow news" is the question this service will get asked most.
+            nowt = time.time()
+            if nowt - last_beat > 900:
+                last_beat = nowt
+                with _lock:
+                    st = dict(_state)
+                log(f"stream: alive -- {st['stored']} stored, {st['filtered']} filtered, "
+                    f"{st['duplicates']} duplicates, {st['reconnects']} reconnects "
+                    f"since boot")
             if not raw:
                 continue
             try:
