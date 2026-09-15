@@ -68,6 +68,8 @@
   .badge.positive { background:rgba(63,191,95,.16); color:var(--good); }
   .badge.negative { background:rgba(240,74,74,.16); color:var(--bad); }
   .badge.unclear { background:var(--surface-2); color:var(--muted); }
+  .tick { font-family:var(--mono); font-size:12px; font-weight:700; padding:2px 6px;
+          border-radius:4px; background:var(--surface-2); border:1px solid var(--line); }
   @media (max-width:640px){ .hl { max-width:210px; } }
 </style>
 </head>
@@ -168,6 +170,10 @@
         'sits near 1.0, the Big News rail is not selecting anything and the '+
         'whole feature should go.</p>';
     }
+    parts.push(gradedTable('⚡ Big News — every call, graded', d.recent_big,
+      'Each Big News call with the ticker it was graded against and what that '+
+      'stock actually did. The misses are in here too — that is the point.'));
+
     parts.push('<section class="panel"><h2>Every headline — the comparison</h2>'+
       '<div class="pad">'+lift+statRow(d.overall)+
       '<p class="caveat" style="margin:10px 0 0">This row exists to make the one '+
@@ -191,6 +197,23 @@
 
     parts.push(breakdown('Category', d.by_category, null));
 
+    function gradedTable(title, list, note){
+      if(!(list||[]).length) return '';
+      var rows=list.map(function(r){
+        return '<tr><td class="dim" style="white-space:nowrap">'+esc(when(r.created_at))+'</td>'+
+          '<td><span class="hl">'+(r.url?'<a href="'+esc(r.url)+'" target="_blank" rel="noopener noreferrer">'+esc(r.headline)+'</a>':esc(r.headline))+'</span></td>'+
+          '<td><span class="tick">'+esc(r.symbol||'—')+'</span></td>'+
+          '<td>'+(r.tone?'<span class="badge '+esc(r.tone)+'">'+esc(r.tone)+'</span>':'')+'</td>'+
+          '<td class="num">'+signed(r.move_15m)+'</td>'+
+          '<td class="num">'+signed(r.move_60m)+'</td></tr>';
+      }).join('');
+      return '<section class="panel"><h2>'+esc(title)+'</h2>'+
+        (note?'<div class="pad" style="padding-bottom:0"><p class="caveat" style="margin:0">'+note+'</p></div>':'')+
+        '<div class="scroll"><table><thead><tr><th>When</th><th>Headline</th>'+
+        '<th>Ticker graded</th><th>Called</th><th class="num">+15 min</th>'+
+        '<th class="num">+60 min</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>';
+    }
+
     if((d.recent||[]).length){
       var rows=d.recent.map(function(r){
         return '<tr><td class="dim" style="white-space:nowrap">'+esc(when(r.created_at))+'</td>'+
@@ -200,7 +223,7 @@
           '<td class="num">'+signed(r.move_15m)+'</td>'+
           '<td class="num">'+signed(r.move_60m)+'</td></tr>';
       }).join('');
-      parts.push('<section class="panel"><h2>Recently graded</h2><div class="scroll">'+
+      parts.push('<section class="panel"><h2>Everything else, recently graded</h2><div class="scroll">'+
         '<table><thead><tr><th>When</th><th>Headline</th><th>Ticker</th><th>Called</th>'+
         '<th class="num">+15 min</th><th class="num">+60 min</th></tr></thead><tbody>'+
         rows+'</tbody></table></div></section>');

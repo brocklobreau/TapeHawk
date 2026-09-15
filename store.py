@@ -318,18 +318,25 @@ def scoreboard(days=30):
                                                  key=lambda kv: -len(kv[1]))[:8]}
 
     big = [r for r in all_rows if (r["importance"] or 0) >= 5]
-    recent = [{"headline": r["headline"], "symbol": r["grade_symbol"],
-               "created_at": r["created_at"], "url": r["url"],
-               "impact_level": r["impact_level"], "tone": r["tone"],
-               "move_15m": r["move_15m"], "move_60m": r["move_60m"],
-               "importance": r["importance"]}
-              for r in all_rows[:40]]
+    def as_row(r):
+        return {"headline": r["headline"], "symbol": r["grade_symbol"],
+                "created_at": r["created_at"], "url": r["url"],
+                "impact_level": r["impact_level"], "tone": r["tone"],
+                "move_15m": r["move_15m"], "move_60m": r["move_60m"],
+                "importance": r["importance"]}
+
+    recent = [as_row(r) for r in all_rows[:40]]
+    # Big News gets its own list. Mixed into forty routine headlines, the
+    # handful of calls that actually matter are impossible to pick out --
+    # which is the whole thing a reader comes to this page to check.
+    recent_big = [as_row(r) for r in big[:25]]
 
     pending = c.execute("SELECT COUNT(*) n FROM headlines "
                         "WHERE graded_at IS NULL AND is_noise = 0").fetchone()["n"]
     skipped = c.execute("SELECT COUNT(*) n FROM headlines "
                         "WHERE graded_at IS NOT NULL AND move_60m IS NULL").fetchone()["n"]
     return {"days": days, "overall": summarise(all_rows), "big_news": summarise(big),
+            "recent_big": recent_big,
             "by_impact": by_impact, "by_tone": by_tone, "by_category": by_cat,
             "recent": recent, "pending": pending, "ungradeable": skipped}
 
