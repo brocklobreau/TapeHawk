@@ -39,6 +39,7 @@
   .search button { background:var(--accent); color:#1a1205; border:0; padding:7px 14px;
     border-radius:7px; font-weight:650; cursor:pointer; font-size:13px; }
 
+  .bigwrap { max-width:1500px; margin:16px auto 0; padding:0 16px; }
   .wrap { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
           gap:16px; padding:16px; max-width:1500px; margin:0 auto; align-items:start; }
   @media (max-width:980px){ .wrap { grid-template-columns:1fr; } }
@@ -55,6 +56,9 @@
     font-weight:600; user-select:none; }
   .chip:hover { color:var(--ink); }
   .chip.on { background:var(--accent); border-color:var(--accent); color:#1a1205; }
+  .chip.symfilter { background:var(--surface-2); border-color:var(--accent);
+    color:var(--accent); font-family:var(--mono); }
+  .chip.symfilter b { color:var(--ink); margin-left:5px; font-weight:700; }
 
   .feed { max-height:calc(100vh - 190px); overflow-y:auto; }
   @media (max-width:980px){ .feed { max-height:none; } }
@@ -81,6 +85,19 @@
   .src { font-size:11.5px; color:var(--faint); margin-top:4px; }
 
   .empty { padding:26px 16px; color:var(--muted); font-size:13.5px; }
+
+  .bigwrap { margin-bottom:16px; }
+  .bigwrap .panel { border-color:rgba(255,176,32,.42); }
+  .bigwrap > .panel > h2 { color:var(--accent); border-bottom-color:rgba(255,176,32,.28); }
+  .big-item { padding:12px 14px; border-bottom:1px solid var(--line); }
+  .big-item:last-child { border-bottom:0; }
+  .big-head { font-size:15.5px; line-height:1.4; font-weight:600; }
+  .big-head a { text-decoration:none; }
+  .big-head a:hover { text-decoration:underline; text-decoration-color:var(--accent); }
+  .why { margin-top:6px; font-size:11.5px; color:var(--muted); }
+  .why b { color:var(--accent); font-weight:600; }
+  .score { font-family:var(--mono); font-size:10.5px; color:var(--accent);
+           border:1px solid rgba(255,176,32,.42); border-radius:4px; padding:1px 5px; }
 
   .rhead { padding:14px; border-bottom:1px solid var(--line); }
   .rname { font-size:19px; font-weight:700; margin:0; }
@@ -115,6 +132,13 @@
     <button id="go">Research</button>
   </div>
 </header>
+
+<div class="bigwrap" id="bigwrap" hidden>
+  <section class="panel">
+    <h2>⚡ Big news <span style="color:var(--faint);font-weight:400">— the ones that actually matter</span></h2>
+    <div id="bignews"></div>
+  </section>
+</div>
 
 <div class="wrap">
   <section class="panel">
@@ -156,6 +180,21 @@
     if(s<86400)return Math.floor(s/3600)+'h ago';
     return new Date(t).toLocaleDateString(); }
 
+  // Looking up a ticker filters the feed to it. Without a visible, clearable
+  // indicator that filter is invisible and permanent -- the category chips do
+  // not clear it -- so the feed looks broken while it is merely filtered.
+  function renderSymFilter(){
+    var old=document.getElementById('symfilter');
+    if(old) old.remove();
+    if(!activeSym) return;
+    var b=document.createElement('span');
+    b.className='chip symfilter'; b.id='symfilter';
+    b.innerHTML=esc(activeSym)+' <b>&times;</b>';
+    b.title='Showing only '+activeSym+' — click to clear';
+    b.onclick=function(){ activeSym=''; renderSymFilter(); load(); };
+    filters.appendChild(b);
+  }
+
   CATS.forEach(function(c){
     var b=document.createElement('span'); b.className='chip'+(c[0]===''?' on':'');
     b.textContent=c[1]; b.setAttribute('data-cat',c[0]);
@@ -180,9 +219,11 @@
                       : esc(h.headline);
     var d=document.createElement('div');
     d.className='item'+(isNew?' new':'');
+    d.setAttribute('data-id', h.id);
     d.innerHTML='<div class="meta"><span class="time">'+esc(ago(h.created_at))+'</span>'+lat+tags+syms+'</div>'+
                 '<div class="headline">'+title+'</div>'+
-                (h.source?'<div class="src">'+esc(h.source)+(h.author?' · '+esc(h.author):'')+'</div>':'');
+                (h.source?'<div class="src">'+esc(h.source)+(h.author?' · '+esc(h.author):'')+'</div>':'')+
+                '<span class="expand">Read the story ▾</span>';
     return d;
   }
 
@@ -197,6 +238,42 @@
     });
     while(feed.children.length>300) feed.removeChild(feed.lastChild);
     count.textContent = items.length ? '· '+items.length : '';
+  }
+
+  function bigRow(h){
+    var syms=(h.symbols||[]).slice(0,6).map(function(s){
+      return '<span class="sym" data-sym="'+esc(s)+'">'+esc(s)+'</span>'; }).join('');
+    var title = h.url ? '<a href="'+esc(h.url)+'" target="_blank" rel="noopener noreferrer">'+esc(h.headline)+'</a>'
+                      : esc(h.headline);
+    var why = (h.reasons||[]).length
+      ? '<div class="why"><b>Flagged because:</b> '+esc(h.reasons.join(' · '))+'</div>' : '';
+    var d=document.createElement('div');
+    d.className='big-item';
+    d.setAttribute('data-id', h.id);
+    d.innerHTML='<div class="meta"><span class="time">'+esc(ago(h.created_at))+'</span>'+
+                '<span class="score">'+(h.importance||0)+'</span>'+syms+'</div>'+
+                '<div class="big-head">'+title+'</div>'+why+
+                '<span class="expand">Read the story ▾</span>';
+    return d;
+  }
+
+  var bigSeen={};
+  function paintBig(list, prepend){
+    var box=document.getElementById('bignews');
+    if(!prepend) { box.innerHTML=''; bigSeen={}; }
+    list.forEach(function(h){
+      if(bigSeen[h.id]) return; bigSeen[h.id]=1;
+      var el=bigRow(h);
+      if(prepend) box.insertBefore(el, box.firstChild); else box.appendChild(el);
+    });
+    while(box.children.length>8) box.removeChild(box.lastChild);
+    document.getElementById('bigwrap').hidden = box.children.length===0;
+  }
+
+  function loadBig(){
+    fetch('/api/feed?big=1&limit=8').then(function(r){return r.json();}).then(function(d){
+      paintBig(d.headlines||[], false);
+    }).catch(function(){});
   }
 
   function load(){
@@ -215,9 +292,53 @@
     }).catch(function(){ livetext.textContent='offline'; dot.className='dot off'; });
   }
 
-  feed.addEventListener('click', function(e){
+  // Delegated on the document, not on #feed. Ticker chips also appear in the
+  // big-news rail, which lives OUTSIDE #feed -- binding to the feed alone left
+  // every ticker in the most prominent section on the page silently dead.
+  document.addEventListener('click', function(e){
     var s=e.target.closest('.sym'); if(!s) return;
     lookup(s.getAttribute('data-sym'));
+  });
+
+  // Clicking a headline pulls the story behind it. Benzinga's own summary and
+  // body usually contain exactly the detail a headline cannot carry -- for a
+  // deal headline, the structure of the deal. Fetched per article rather than
+  // shipped with the feed so the feed stays fast.
+  var storyCache = {};
+  function toggleStory(host, id){
+    var open = host.querySelector('.story');
+    if (open) { open.remove();
+      host.querySelector('.expand').textContent = 'Read the story ▾'; return; }
+    var box = document.createElement('div');
+    box.className = 'story';
+    box.innerHTML = '<p>Loading…</p>';
+    host.appendChild(box);
+    host.querySelector('.expand').textContent = 'Hide ▴';
+    function render(d){
+      var parts = [];
+      if (d.summary) parts.push('<p class="lede">'+esc(d.summary)+'</p>');
+      if (d.content) {
+        d.content.split(/\n\n+/).slice(0,6).forEach(function(par){
+          if (par.trim()) parts.push('<p>'+esc(par.trim())+'</p>');
+        });
+      }
+      if (!parts.length) parts.push('<p>No further detail came with this headline.'+
+        (d.url ? ' Open the original for the full story.' : '')+'</p>');
+      if (d.url) parts.push('<p class="src2"><a href="'+esc(d.url)+'" target="_blank" '+
+        'rel="noopener noreferrer">Read the full article at '+esc(d.source||'source')+' →</a></p>');
+      box.innerHTML = parts.join('');
+    }
+    if (storyCache[id]) { render(storyCache[id]); return; }
+    fetch('/api/article/'+id).then(function(r){return r.json();}).then(function(d){
+      if (d.error) { box.innerHTML = '<p>Couldn\'t load the story.</p>'; return; }
+      storyCache[id] = d; render(d);
+    }).catch(function(){ box.innerHTML = '<p>Couldn\'t load the story.</p>'; });
+  }
+
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('.expand'); if(!t) return;
+    var host = t.closest('.item, .big-item'); if(!host) return;
+    toggleStory(host, host.getAttribute('data-id'));
   });
 
   function kv(k,v,cls){ return '<div class="kv"><span>'+esc(k)+'</span><span class="'+(cls||'')+'">'+v+'</span></div>'; }
@@ -269,6 +390,7 @@
           'cheap for a reason. Headlines are categorised by keyword matching, not by reading them.</div>';
         if((d.news||[]).length){
           activeSym=d.ticker;
+          renderSymFilter();
           [].forEach.call(filters.children,function(x){x.classList.toggle('on',x.getAttribute('data-cat')==='');});
           activeCat=''; load();
         }
@@ -276,7 +398,7 @@
       .catch(function(){ rbody.innerHTML='<div class="empty">Lookup failed.</div>'; });
   }
 
-  go.onclick=function(){ activeSym=''; lookup((tick.value||'').trim().toUpperCase()); };
+  go.onclick=function(){ activeSym=''; renderSymFilter(); lookup((tick.value||'').trim().toUpperCase()); };
   tick.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); go.onclick(); } };
 
   // live push
@@ -286,6 +408,9 @@
     es.onmessage=function(ev){
       try{
         var h=JSON.parse(ev.data);
+        // The big rail is unfiltered on purpose: a $60bn deal should reach
+        // you whether or not you happen to be filtering the main feed.
+        if(h.big) paintBig([h], true);
         if(activeCat && (h.categories||[]).indexOf(activeCat)<0) return;
         if(activeSym && (h.symbols||[]).indexOf(activeSym)<0) return;
         paint([h], true);
@@ -295,8 +420,9 @@
     es.onerror=function(){ dot.className='dot off'; };
   }
 
-  load(); connect();
+  load(); loadBig(); connect();
   setInterval(load, 60000);
+  setInterval(loadBig, 120000);
   setInterval(function(){
     [].forEach.call(feed.querySelectorAll('.time'), function(el, i){
       if(items[i]) el.textContent=ago(items[i].created_at);

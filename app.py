@@ -89,12 +89,23 @@ def api_feed():
             category=(request.args.get("category") or "").strip() or None,
             include_noise=request.args.get("include_noise") == "1",
             search=(request.args.get("q") or "").strip() or None,
+            min_importance=5 if request.args.get("big") == "1" else None,
         )
         return {"headlines": rows, "stats": store.stats(),
                 "stream": news_stream.status()}
     except Exception as e:
         log(f"feed failed: {e}")
         return {"error": "Could not read the feed."}, 500
+
+
+@app.route("/api/article/<int:article_id>")
+def api_article(article_id):
+    """The story behind a headline: Benzinga's own summary and body. Fetched
+    on click rather than shipped with the feed, so the feed stays fast."""
+    row = store.get(article_id)
+    if not row:
+        return {"error": "Not found"}, 404
+    return row
 
 
 @app.route("/api/stream")

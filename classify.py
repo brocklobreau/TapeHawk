@@ -58,7 +58,12 @@ CATALYST_PATTERNS = (
         # commercial events, both missed because the patterns only had the
         # noun forms "partnership" and "contract".
         r"\bpartners?\s+(?:with|to)\b", r"\bteams?\s+up\s+with\b",
-        r"\bsigns?\s+(?:a\s+)?(?:deal|agreement|contract|mou)\b",
+        # Allow words between the verb and the noun: the live example was
+        # "Signs $60 Billion Chip Supply Deal With Meta", where the strict
+        # adjacent form matched nothing and the biggest contract on the wire
+        # carried no contract tag.
+        r"\bsigns?\b.{0,45}?\b(?:deal|agreement|contract|mou|pact)\b",
+        r"\benters?\s+into\b.{0,40}?\b(?:agreement|deal|contract)\b",
         r"\b(?:wind|defense|supply|equipment)?\s*orders?\s+(?:lifts?|boosts?|worth|from|for)\b",
         r"\bselected\s+by\b", r"\bwins?\s+(?:contract|order|bid|tender)\b",
     )),
@@ -174,6 +179,23 @@ _SUBS = {
 }
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"[ \t]*\n\s*\n\s*")
+
+
+def strip_html(text):
+    """Article bodies arrive as HTML. Block-level tags become paragraph breaks
+    before stripping, so sentences do not run together into one wall of text."""
+    t = str(text or "")
+    t = re.sub(r"</(p|div|li|h[1-6]|tr)>", "\n\n", t, flags=re.I)
+    t = re.sub(r"<br\s*/?>", "\n", t, flags=re.I)
+    t = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", t, flags=re.I | re.S)
+    t = _TAG_RE.sub("", t)
+    t = normalize(t)
+    t = _WS_RE.sub("\n\n", t)
+    return t.strip()
+
+
 def normalize(text):
     t = html.unescape(str(text or ""))
     for bad, good in _SUBS.items():
@@ -229,3 +251,142 @@ def catalyst_summary(events):
             counts[c] = counts.get(c, 0) + 1
     return [{"category": c, "label": CATEGORY_LABEL[c], "count": n}
             for c, n in sorted(counts.items(), key=lambda kv: -kv[1])]
+
+
+# --- how big a deal is this? ----------------------------------------------
+#
+# The feed runs ~0.8 headlines a minute, most of which are ordinary. What a
+# trader actually wants is the two or three a day that genuinely matter --
+# the AMD/Meta $60bn kind -- surfaced above everything else.
+#
+# What this DOES: score a headline on things that are mechanically visible.
+# A dollar figure is the strongest single signal there is; $60 billion and
+# "analyst nudges target" are not the same event and the arithmetic knows it.
+# Category, magnitude words and breadth of tickers refine it.
+#
+# What this does NOT do, stated plainly because the distinction is the whole
+# honesty of the feature: it does not UNDERSTAND the news. Given "AMD signs
+# $60B deal with Meta, warrants vest as shares reach $600", it will correctly
+# shout that this is enormous. It will not tell you the warrant structure
+# means Meta is effectively long AMD upside. That is comprehension, and no
+# amount of regex gets there. The score is a spotlight, not an analyst.
+#
+# Every flagged headline carries its REASONS, so when it surfaces something
+# stupid you can see exactly which rule misfired and fix that rule.
+
+_MAGNITUDE = {
+    "halted": 3, "halt": 3, "bankruptcy": 3, "chapter 11": 3, "delisted": 3,
+    "record": 1, "largest": 2, "biggest": 2, "historic": 2, "unprecedented": 2,
+    "plunges": 2, "plunge": 2, "soars": 2, "soar": 2, "surges": 2, "surge": 2,
+    "crashes": 2, "collapse": 2, "slashes": 2, "doubles": 2, "triples": 2,
+    "breakthrough": 2, "landmark": 2, "massive": 1, "sweeping": 1,
+}
+_MAG_RE = {w: re.compile(r"\b" + re.escape(w) + r"\b", re.I) for w in _MAGNITUDE}
+
+# Category weights. M&A and regulatory/clinical outcomes move prices hardest;
+# an analyst note almost never does on its own.
+_CAT_WEIGHT = {"m&a": 3, "clinical": 3, "contract": 2, "capital": 2,
+               "legal": 2, "earnings": 1, "leadership": 1, "product": 1,
+               "analyst": 0}
+
+# Events that are market-moving on their own, whatever the dollar figure.
+# Added after testing: an FDA approval and a trading halt both scored 3 and
+# would have been buried, which is exactly backwards -- a halt is the single
+# most urgent thing that can appear on a wire, and it never carries a price
+# tag. Weighting purely on money was a bias toward big-cap M&A and against
+# biotech, where the whole company can reprice on a one-line regulatory
+# decision with no number in it at all.
+_CRITICAL_PATTERNS = (
+    r"\bfda\s+approv", r"\bapproved\s+by\s+the\s+fda\b",
+    r"\bcomplete\s+response\s+letter\b", r"\bfda\s+reject",
+    r"\btrading\s+halted\b", r"\bhalted\s+(?:in|for|pending)\b",
+    r"\bbankrupt", r"\bchapter\s+11\b", r"\bdelisted\b", r"\bdefaults?\s+on\b",
+    r"\bmerger\s+agreement\b", r"\bdefinitive\s+agreement\b",
+    r"\bto\s+acquire\b.*\$", r"\bacquires?\b.*\bfor\s+\$",
+    r"\bphase\s*3\b.*\b(?:meets?|hits?|fails?|misses?|beats?)\b",
+    r"\bfails?\s+(?:to\s+meet\s+)?(?:primary\s+)?endpoint\b",
+    r"\bmeets?\s+primary\s+endpoint\b",
+    r"\bguidance\s+(?:cut|slashed|withdrawn|pulled)\b",
+    r"\bwithdraws?\b.{0,20}?\b(?:guidance|outlook|forecast)\b",
+    r"\bsuspends?\b.{0,20}?\b(?:guidance|outlook|dividend)\b",
+    r"\bceo\s+(?:resigns|steps?\s+down|ousted|fired)\b",
+    r"\bstock\s+split\b", r"\btender\s+offer\b",
+    r"\bgoing\s+private\b", r"\btakeover\s+bid\b",
+)
+_CRITICAL_RE = [re.compile(p, re.I) for p in _CRITICAL_PATTERNS]
+
+_MONEY_RE = re.compile(
+    r"\$\s?([\d,]+(?:\.\d+)?)\s*(trillion|billion|million|bn|mn|[bmt])\b", re.I)
+_MULT = {"trillion": 1e12, "t": 1e12, "billion": 1e9, "bn": 1e9, "b": 1e9,
+         "million": 1e6, "mn": 1e6, "m": 1e6}
+
+
+def biggest_dollar_amount(text):
+    """Largest dollar figure in the headline, in dollars. None if there is
+    no figure. Reads $60 billion, $4.9B and $500 million alike."""
+    best = None
+    for m in _MONEY_RE.finditer(normalize(text)):
+        try:
+            v = float(m.group(1).replace(",", "")) * _MULT[m.group(2).lower()]
+        except (ValueError, KeyError):
+            continue
+        if best is None or v > best:
+            best = v
+    return best
+
+
+def importance(title, symbols=None, categories=None):
+    """Returns {"score", "big", "reasons", "dollars"}.
+
+    `big` is what the UI promotes. The threshold is set so a headline needs
+    real weight -- a large sum, or a major category plus a magnitude word --
+    rather than any single weak hint. Tuned deliberately toward missing
+    borderline stories rather than flooding the section: a "big news" rail
+    that fires ten times an hour is one nobody reads."""
+    t = normalize(title)
+    cats = categories if categories is not None else classify_headline(t)
+    score, reasons = 0, []
+
+    dollars = biggest_dollar_amount(t)
+    if dollars:
+        if dollars >= 50e9:
+            score += 6; reasons.append(f"${dollars/1e9:,.0f}B — enormous")
+        elif dollars >= 10e9:
+            score += 5; reasons.append(f"${dollars/1e9:,.1f}B")
+        elif dollars >= 1e9:
+            score += 3; reasons.append(f"${dollars/1e9:,.1f}B")
+        elif dollars >= 250e6:
+            score += 1; reasons.append(f"${dollars/1e6:,.0f}M")
+
+    for c in cats:
+        w = _CAT_WEIGHT.get(c, 0)
+        if w:
+            score += w
+            reasons.append(CATEGORY_LABEL.get(c, c))
+
+    for word, w in _MAGNITUDE.items():
+        if _MAG_RE[word].search(t):
+            score += w
+            reasons.append(f"“{word}”")
+            break          # one magnitude word is the signal; five is a style
+
+    for r in _CRITICAL_RE:
+        m = r.search(t)
+        if m:
+            score += 4
+            reasons.append(f"critical event ({m.group(0).strip().lower()})")
+            break
+
+    n = len(symbols or [])
+    if n >= 4:
+        score += 1
+        reasons.append(f"{n} tickers affected")
+
+    # Filler can never be big news, whatever else it scores. An options-income
+    # listicle mentioning "$500 a month" must not reach the top rail.
+    if is_noise(t):
+        return {"score": 0, "big": False, "reasons": ["filtered as routine"],
+                "dollars": dollars}
+
+    return {"score": score, "big": score >= 5, "reasons": reasons,
+            "dollars": dollars}

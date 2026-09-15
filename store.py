@@ -25,7 +25,13 @@ DB_PATH = os.environ.get("TAPEHAWK_DB", os.path.join(
 
 _local = threading.local()
 
-SCHEMA = """
+# Table and indexes are separate on purpose, and the order matters. The index
+# on `importance` cannot be created until that column exists, and
+# CREATE TABLE IF NOT EXISTS does nothing to a database that predates it -- so
+# running them together meant "no such column: importance" on startup against
+# any existing database, i.e. the feature would have taken the live service
+# down on deploy. Table first, then migrate columns, then indexes.
+TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS headlines (
   id           INTEGER PRIMARY KEY,
   alpaca_id    INTEGER UNIQUE,
@@ -39,10 +45,17 @@ CREATE TABLE IF NOT EXISTS headlines (
   url          TEXT,
   symbols      TEXT,
   categories   TEXT,
-  is_noise     INTEGER DEFAULT 0
+  is_noise     INTEGER DEFAULT 0,
+  importance   INTEGER DEFAULT 0,
+  reasons      TEXT,
+  content      TEXT
 );
+"""
+
+INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_created ON headlines(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_noise_created ON headlines(is_noise, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_importance ON headlines(importance DESC, id DESC);
 """
 
 
@@ -57,7 +70,18 @@ def _conn():
         # means the page locks up precisely when headlines are arriving.
         c.execute("PRAGMA journal_mode=WAL")
         c.execute("PRAGMA synchronous=NORMAL")
-        c.executescript(SCHEMA)
+        c.executescript(TABLE_SQL)
+        # Additive migration. CREATE TABLE IF NOT EXISTS does nothing to a
+        # table that already exists, so a database created before these
+        # columns existed would never gain them and every insert would fail.
+        # Checking and adding is the difference between shipping a feature and
+        # taking the service down on deploy.
+        have = {r["name"] for r in c.execute("PRAGMA table_info(headlines)")}
+        for col, ddl in (("importance", "INTEGER DEFAULT 0"), ("reasons", "TEXT"),
+                         ("content", "TEXT")):
+            if col not in have:
+                c.execute(f"ALTER TABLE headlines ADD COLUMN {col} {ddl}")
+        c.executescript(INDEX_SQL)          # only now are all columns present
         c.commit()
         _local.conn = c
     return c
@@ -79,14 +103,18 @@ def insert(article):
     cur = c.execute(
         """INSERT OR IGNORE INTO headlines
            (alpaca_id, created_at, received_at, latency_ms, headline, summary,
-            author, source, url, symbols, categories, is_noise)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            author, source, url, symbols, categories, is_noise,
+            importance, reasons, content)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (article.get("alpaca_id"), article["created_at"], article["received_at"],
          article.get("latency_ms"), article["headline"], article.get("summary"),
          article.get("author"), article.get("source"), article.get("url"),
          json.dumps(article.get("symbols") or []),
          json.dumps(article.get("categories") or []),
-         1 if article.get("is_noise") else 0))
+         1 if article.get("is_noise") else 0,
+         int(article.get("importance") or 0),
+         json.dumps(article.get("reasons") or []),
+         article.get("content")))
     c.commit()
     return cur.rowcount > 0
 
@@ -95,13 +123,27 @@ def _row(r):
     d = dict(r)
     d["symbols"] = json.loads(d.get("symbols") or "[]")
     d["categories"] = json.loads(d.get("categories") or "[]")
+    d["reasons"] = json.loads(d.get("reasons") or "[]")
+    d["has_content"] = bool(d.get("content"))
+    d["big"] = (d.get("importance") or 0) >= 5
     d["is_noise"] = bool(d.get("is_noise"))
     return d
 
 
+def get(article_id):
+    """One article WITH its body. Kept out of recent() on purpose: bodies run
+    to a couple of thousand characters, and eighty of them would turn a feed
+    request that should be ~40KB into something close to a megabyte, on the
+    one endpoint that has to feel instant."""
+    r = _conn().execute("SELECT * FROM headlines WHERE id = ?", (article_id,)).fetchone()
+    return _row(r) if r else None
+
+
 def recent(limit=100, since_id=None, symbol=None, category=None,
-           include_noise=False, search=None):
-    sql = "SELECT * FROM headlines WHERE 1=1"
+           include_noise=False, search=None, min_importance=None):
+    sql = ("SELECT id, alpaca_id, created_at, received_at, latency_ms, headline, "
+           "summary, author, source, url, symbols, categories, is_noise, "
+           "importance, reasons FROM headlines WHERE 1=1")
     args = []
     if not include_noise:
         sql += " AND is_noise = 0"
@@ -119,6 +161,9 @@ def recent(limit=100, since_id=None, symbol=None, category=None,
     if search:
         sql += " AND (headline LIKE ? OR summary LIKE ?)"
         args.extend([f"%{search}%", f"%{search}%"])
+    if min_importance:
+        sql += " AND importance >= ?"
+        args.append(int(min_importance))
     sql += " ORDER BY id DESC LIMIT ?"
     args.append(min(int(limit), 300))
     return [_row(r) for r in _conn().execute(sql, args)]

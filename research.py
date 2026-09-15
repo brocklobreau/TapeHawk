@@ -85,12 +85,21 @@ def valuation_read(pe, fwd_pe, growth_pct, margin_pct, upside_pct):
     if pe is not None:
         if pe <= 0:
             notes.append("No P/E — the company is not profitable on a trailing basis.")
-        elif pe < 15:
-            points.append(1); notes.append(f"P/E of {pe:.1f} is low against the ~18-20 long-run market average.")
-        elif pe < 25:
+        elif pe < 12:
+            points.append(2); notes.append(f"P/E of {pe:.1f} is genuinely low against the ~18-20 long-run market average.")
+        elif pe < 18:
+            points.append(1); notes.append(f"P/E of {pe:.1f} is below the long-run market average.")
+        elif pe < 28:
             points.append(0); notes.append(f"P/E of {pe:.1f} is around the market average.")
-        else:
+        elif pe < 45:
             points.append(-1); notes.append(f"P/E of {pe:.1f} is rich — it needs growth to justify it.")
+        else:
+            # Weighted -2, and the threshold below raised to match, because a
+            # 92x stock was being summarised as "Looks cheap on these numbers"
+            # while the very first bullet underneath it said the P/E was rich.
+            # A verdict that contradicts its own evidence is worse than no
+            # verdict: the headline is the part people read.
+            points.append(-2); notes.append(f"P/E of {pe:.1f} is very expensive — the market is pricing in a lot.")
     if fwd_pe is not None and pe and fwd_pe > 0 and pe > 0:
         if fwd_pe < pe * 0.85:
             points.append(1)
@@ -118,9 +127,23 @@ def valuation_read(pe, fwd_pe, growth_pct, margin_pct, upside_pct):
         return {"read": "Not enough data", "score": None, "notes":
                 ["Not enough fundamental data to form a view."]}
     total = sum(points)
-    if total >= 2:
+    # The value trap deserves its own verdict rather than being squeezed into
+    # "cheap" or "expensive". A stock on 8x earnings with revenue shrinking is
+    # not expensive -- calling it that would be plainly wrong -- but calling it
+    # cheap is how people lose money, and "fairly priced" says nothing at all.
+    # Naming the pattern is the single most useful thing a screen like this can
+    # do, and it is exactly the "cheap for a reason" warning in the footnote.
+    cheap_multiple = pe is not None and 0 < pe < 15
+    deteriorating = ((growth_pct is not None and growth_pct < -5)
+                     or (margin_pct is not None and margin_pct < 0))
+    if cheap_multiple and deteriorating:
+        read = "Cheap multiple, but the business is shrinking — value-trap territory"
+        notes.insert(0, "The low multiple and the falling numbers are probably "
+                        "the same fact: the market is pricing the decline, not "
+                        "missing it.")
+    elif total >= 3:
         read = "Looks cheap on these numbers"
-    elif total <= -2:
+    elif total <= -3:
         read = "Looks expensive on these numbers"
     else:
         read = "Roughly fairly priced on these numbers"

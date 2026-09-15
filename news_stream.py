@@ -136,6 +136,7 @@ def _handle(msg, log):
         return
     cats = classify.classify_headline(headline)
     noise = classify.is_noise(headline)
+    imp = classify.importance(headline, msg.get("symbols") or [], cats)
 
     article = {
         "alpaca_id": msg.get("id"),
@@ -143,7 +144,13 @@ def _handle(msg, log):
         "received_at": now.isoformat(),
         "latency_ms": latency_ms,
         "headline": headline,
-        "summary": classify.normalize(msg.get("summary"))[:600] or None,
+        "summary": classify.normalize(msg.get("summary"))[:800] or None,
+        # Benzinga sends the article body as HTML. Stripped and capped here so
+        # the detail view can explain the story in the reporter's own words --
+        # for the AMD/Meta deal that body is where the warrant structure is
+        # actually spelled out. Storing it and never showing it, which is what
+        # this did with `summary` until now, is the same as not having it.
+        "content": classify.strip_html(msg.get("content"))[:4000] or None,
         "author": msg.get("author"),
         "source": msg.get("source"),
         "url": msg.get("url"),
@@ -151,6 +158,9 @@ def _handle(msg, log):
         "categories": cats,
         "category_labels": [classify.CATEGORY_LABEL[c] for c in cats],
         "is_noise": noise,
+        "importance": imp["score"],
+        "reasons": imp["reasons"],
+        "big": imp["big"],
     }
 
     with _lock:
@@ -182,6 +192,7 @@ def _handle(msg, log):
         syms = ",".join(article["symbols"][:4]) or "-"
         log(f"news [{lat}] [{tags}] [{syms}]"
             + (" FILTERED" if noise else "")
+            + (f" ** BIG {imp['score']}: {'; '.join(imp['reasons'])} **" if imp["big"] else "")
             + f" {headline[:96]}")
 
     # Only push genuinely new, non-filler headlines to open pages. A repeat of
