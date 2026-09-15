@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapehawk — live market headlines</title>
+<style>
+  :root {
+    --bg:#0B0D10; --surface:#12161B; --surface-2:#181D24; --line:#232A33;
+    --ink:#E8EAED; --muted:#8B94A0; --faint:#5A626C;
+    --accent:#FFB020; --good:#3FBF5F; --bad:#F04A4A; --live:#2BD67B;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+         font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  a { color:inherit; }
+
+  header { position:sticky; top:0; z-index:20; background:rgba(11,13,16,.94);
+           backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+           padding:10px 16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
+  .brand span { color:var(--accent); }
+  .live { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted);
+          font-family:var(--mono); }
+  .dot { width:7px; height:7px; border-radius:50%; background:var(--faint); }
+  .dot.on { background:var(--live); box-shadow:0 0 0 0 rgba(43,214,123,.7);
+            animation:pulse 2.2s infinite; }
+  .dot.off { background:var(--bad); }
+  @keyframes pulse { 70%{box-shadow:0 0 0 7px rgba(43,214,123,0);} 100%{box-shadow:0 0 0 0 rgba(43,214,123,0);} }
+  @media (prefers-reduced-motion:reduce){ .dot.on{animation:none;} }
+  .spacer { flex:1; }
+  .search { display:flex; gap:6px; }
+  .search input { background:var(--surface-2); border:1px solid var(--line); color:var(--ink);
+    padding:7px 10px; border-radius:7px; font-family:var(--mono); text-transform:uppercase;
+    width:150px; font-size:13px; }
+  .search input:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .search button { background:var(--accent); color:#1a1205; border:0; padding:7px 14px;
+    border-radius:7px; font-weight:650; cursor:pointer; font-size:13px; }
+
+  .wrap { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
+          gap:16px; padding:16px; max-width:1500px; margin:0 auto; align-items:start; }
+  @media (max-width:980px){ .wrap { grid-template-columns:1fr; } }
+
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:11px; }
+  .panel > h2 { margin:0; padding:11px 14px; font-size:12px; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--muted); border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:10px; }
+
+  .filters { display:flex; gap:5px; flex-wrap:wrap; padding:10px 14px;
+             border-bottom:1px solid var(--line); }
+  .chip { font-size:11.5px; padding:4px 9px; border-radius:999px; cursor:pointer;
+    background:var(--surface-2); border:1px solid var(--line); color:var(--muted);
+    font-weight:600; user-select:none; }
+  .chip:hover { color:var(--ink); }
+  .chip.on { background:var(--accent); border-color:var(--accent); color:#1a1205; }
+
+  .feed { max-height:calc(100vh - 190px); overflow-y:auto; }
+  @media (max-width:980px){ .feed { max-height:none; } }
+  .item { padding:11px 14px; border-bottom:1px solid var(--line); display:block; }
+  .item:last-child { border-bottom:0; }
+  .item.new { animation:flash 1.6s ease-out; }
+  @keyframes flash { from{background:rgba(255,176,32,.13);} to{background:transparent;} }
+  @media (prefers-reduced-motion:reduce){ .item.new{animation:none;} }
+  .meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:5px; }
+  .time { font-family:var(--mono); font-size:11.5px; color:var(--faint); }
+  .lat  { font-family:var(--mono); font-size:10.5px; color:var(--live); }
+  .tag  { font-size:10.5px; font-weight:700; letter-spacing:.03em; padding:2px 6px;
+          border-radius:4px; background:rgba(255,176,32,.14); color:var(--accent);
+          text-transform:uppercase; }
+  .tag.legal { background:rgba(240,74,74,.14); color:var(--bad); }
+  .tag.clinical { background:rgba(63,191,95,.14); color:var(--good); }
+  .sym { font-family:var(--mono); font-size:11.5px; font-weight:700; padding:2px 6px;
+         border-radius:4px; background:var(--surface-2); border:1px solid var(--line);
+         cursor:pointer; color:var(--ink); }
+  .sym:hover { border-color:var(--accent); color:var(--accent); }
+  .headline { font-size:14.5px; line-height:1.45; }
+  .headline a { text-decoration:none; }
+  .headline a:hover { text-decoration:underline; text-decoration-color:var(--accent); }
+  .src { font-size:11.5px; color:var(--faint); margin-top:4px; }
+
+  .empty { padding:26px 16px; color:var(--muted); font-size:13.5px; }
+
+  .rhead { padding:14px; border-bottom:1px solid var(--line); }
+  .rname { font-size:19px; font-weight:700; margin:0; }
+  .rtick { font-family:var(--mono); color:var(--muted); font-size:14px; font-weight:600; }
+  .rsub { color:var(--muted); font-size:12.5px; margin:3px 0 0; }
+  .rprice { font-family:var(--mono); font-size:25px; font-weight:700; margin-top:8px; }
+  .rchg { font-family:var(--mono); font-size:14px; margin-left:8px; }
+  .up { color:var(--good); } .down { color:var(--bad); }
+  .read { margin:12px 14px; padding:11px 13px; border-radius:9px;
+          background:var(--surface-2); border:1px solid var(--line); }
+  .read h4 { margin:0 0 7px; font-size:14px; }
+  .read ul { margin:0; padding-left:17px; color:var(--muted); font-size:12.5px; line-height:1.6; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:0 18px; padding:0 14px 12px; }
+  @media (max-width:520px){ .grid { grid-template-columns:1fr; } }
+  .grid h4 { grid-column:1/-1; margin:14px 0 4px; font-size:11px; text-transform:uppercase;
+             letter-spacing:.06em; color:var(--faint); }
+  .kv { display:flex; justify-content:space-between; gap:10px; padding:4px 0;
+        border-bottom:1px solid var(--line); font-size:13px; }
+  .kv span:first-child { color:var(--muted); }
+  .kv span:last-child { font-family:var(--mono); }
+  .desc { padding:0 14px 14px; color:var(--muted); font-size:12.5px; line-height:1.6; }
+  .note { padding:0 14px 14px; color:var(--faint); font-size:11.5px; line-height:1.55; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">TAPEHAWK<span>.</span></div>
+  <div class="live"><span class="dot" id="dot"></span><span id="livetext">connecting…</span></div>
+  <div class="spacer"></div>
+  <div class="search">
+    <input id="tick" placeholder="NVDA" maxlength="12" autocomplete="off" spellcheck="false" aria-label="Ticker">
+    <button id="go">Research</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <section class="panel">
+    <h2>Live headlines <span id="count" style="color:var(--faint);font-weight:400"></span></h2>
+    <div class="filters" id="filters"></div>
+    <div class="feed" id="feed"><div class="empty">Waiting for headlines…</div></div>
+  </section>
+
+  <section class="panel" id="rpanel">
+    <h2>Company research</h2>
+    <div class="empty" id="rempty">Click a ticker in the feed, or search one above.<br>
+      You'll get valuation, growth, margins, cash flow and an honest read on whether it looks cheap.</div>
+    <div id="rbody"></div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var feed=document.getElementById('feed'), filters=document.getElementById('filters'),
+      dot=document.getElementById('dot'), livetext=document.getElementById('livetext'),
+      count=document.getElementById('count'), rbody=document.getElementById('rbody'),
+      rempty=document.getElementById('rempty'), tick=document.getElementById('tick'),
+      go=document.getElementById('go');
+  var CATS=[['','All'],['clinical','Clinical/FDA'],['m&a','M&A'],['earnings','Earnings'],
+            ['contract','Contracts'],['legal','Legal'],['capital','Capital'],
+            ['analyst','Analyst'],['leadership','Leadership'],['product','Product']];
+  var activeCat='', activeSym='', seen={}, items=[];
+
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function money(v){ if(v==null||isNaN(v))return '—'; var n=+v,a=Math.abs(n);
+    if(a>=1e12)return '$'+(n/1e12).toFixed(2)+'T'; if(a>=1e9)return '$'+(n/1e9).toFixed(2)+'B';
+    if(a>=1e6)return '$'+(n/1e6).toFixed(1)+'M'; return '$'+n.toLocaleString(undefined,{maximumFractionDigits:2});}
+  function num(v,d,s){ return (v==null||isNaN(v))?'—':(+v).toFixed(d==null?2:d)+(s||''); }
+  function pct(v){ if(v==null||isNaN(v))return '—'; var n=+v; return (n>0?'+':'')+n.toFixed(2)+'%'; }
+  function ago(iso){ var t=Date.parse(iso); if(!t)return '';
+    var s=Math.max(0,(Date.now()-t)/1000);
+    if(s<60)return Math.floor(s)+'s ago'; if(s<3600)return Math.floor(s/60)+'m ago';
+    if(s<86400)return Math.floor(s/3600)+'h ago';
+    return new Date(t).toLocaleDateString(); }
+
+  CATS.forEach(function(c){
+    var b=document.createElement('span'); b.className='chip'+(c[0]===''?' on':'');
+    b.textContent=c[1]; b.setAttribute('data-cat',c[0]);
+    b.onclick=function(){ activeCat=c[0];
+      [].forEach.call(filters.children,function(x){x.classList.toggle('on',x.getAttribute('data-cat')===c[0]);});
+      load(); };
+    filters.appendChild(b);
+  });
+
+  function row(h, isNew){
+    var tags=(h.categories||[]).map(function(c){
+      var lbl={'clinical':'Clinical','m&a':'M&A','earnings':'Earnings','contract':'Contract',
+               'legal':'Legal','capital':'Capital','analyst':'Analyst','leadership':'Leadership',
+               'product':'Product'}[c]||c;
+      return '<span class="tag '+esc(c==='legal'?'legal':(c==='clinical'?'clinical':''))+'">'+esc(lbl)+'</span>';
+    }).join('');
+    var syms=(h.symbols||[]).slice(0,6).map(function(s){
+      return '<span class="sym" data-sym="'+esc(s)+'">'+esc(s)+'</span>'; }).join('');
+    var lat = (h.latency_ms!=null && h.latency_ms>=0 && h.latency_ms<60000)
+      ? '<span class="lat">'+(h.latency_ms/1000).toFixed(2)+'s</span>' : '';
+    var title = h.url ? '<a href="'+esc(h.url)+'" target="_blank" rel="noopener noreferrer">'+esc(h.headline)+'</a>'
+                      : esc(h.headline);
+    var d=document.createElement('div');
+    d.className='item'+(isNew?' new':'');
+    d.innerHTML='<div class="meta"><span class="time">'+esc(ago(h.created_at))+'</span>'+lat+tags+syms+'</div>'+
+                '<div class="headline">'+title+'</div>'+
+                (h.source?'<div class="src">'+esc(h.source)+(h.author?' · '+esc(h.author):'')+'</div>':'');
+    return d;
+  }
+
+  function paint(list, prepend){
+    if(!prepend) { feed.innerHTML=''; items=[]; }
+    if(!list.length && !items.length){ feed.innerHTML='<div class="empty">No headlines match this filter yet.</div>'; return; }
+    list.forEach(function(h){
+      if(seen[h.id]) return; seen[h.id]=1;
+      var el=row(h, !!prepend);
+      if(prepend) feed.insertBefore(el, feed.firstChild); else feed.appendChild(el);
+      items.push(h);
+    });
+    while(feed.children.length>300) feed.removeChild(feed.lastChild);
+    count.textContent = items.length ? '· '+items.length : '';
+  }
+
+  function load(){
+    seen={};
+    var u='/api/feed?limit=80';
+    if(activeCat) u+='&category='+encodeURIComponent(activeCat);
+    if(activeSym) u+='&symbol='+encodeURIComponent(activeSym);
+    fetch(u).then(function(r){return r.json();}).then(function(d){
+      if(d.error){ feed.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
+      paint(d.headlines||[], false);
+      var s=d.stream||{}, st=d.stats||{};
+      var best = st.best_latency_ms!=null ? (st.best_latency_ms/1000).toFixed(2)+'s best' : '';
+      livetext.textContent = (s.connected?'live':'reconnecting') +
+        (st.last_hour!=null? ' · '+st.last_hour+'/hr':'') + (best?' · '+best:'');
+      dot.className='dot '+(s.connected?'on':'off');
+    }).catch(function(){ livetext.textContent='offline'; dot.className='dot off'; });
+  }
+
+  feed.addEventListener('click', function(e){
+    var s=e.target.closest('.sym'); if(!s) return;
+    lookup(s.getAttribute('data-sym'));
+  });
+
+  function kv(k,v,cls){ return '<div class="kv"><span>'+esc(k)+'</span><span class="'+(cls||'')+'">'+v+'</span></div>'; }
+
+  function lookup(sym){
+    if(!sym) return;
+    tick.value=sym; rempty.style.display='none';
+    rbody.innerHTML='<div class="empty">Loading '+esc(sym)+'…</div>';
+    fetch('/api/lookup?ticker='+encodeURIComponent(sym))
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,b:j};});})
+      .then(function(res){
+        if(!res.ok){ rbody.innerHTML='<div class="empty">'+esc(res.b.error||'Lookup failed.')+'</div>'; return; }
+        var d=res.b, v=d.valuation||{}, p=d.performance||{}, day=d.day||{}, rd=d.read||{};
+        var chg=d.change_pct;
+        rbody.innerHTML =
+          '<div class="rhead"><h3 class="rname">'+esc(d.name||d.ticker)+' <span class="rtick">'+esc(d.ticker)+'</span></h3>'+
+          '<p class="rsub">'+esc([d.sector,d.industry,d.exchange].filter(Boolean).join(' · '))+'</p>'+
+          '<div class="rprice">'+money(d.price)+
+          (chg!=null?'<span class="rchg '+(chg>=0?'up':'down')+'">'+pct(chg)+'</span>':'')+'</div></div>'+
+          (rd.read?'<div class="read"><h4>'+esc(rd.read)+'</h4><ul>'+
+            (rd.notes||[]).map(function(n){return '<li>'+esc(n)+'</li>';}).join('')+'</ul></div>':'')+
+          '<div class="grid">'+
+            '<h4>Valuation</h4>'+
+            kv('Market cap',money(d.market_cap))+kv('P/E',num(v.pe,1))+
+            kv('Forward P/E',num(v.forward_pe,1))+kv('Price / book',num(v.price_to_book))+
+            kv('Price / sales',num(v.price_to_sales))+kv('EV / EBITDA',num(v.ev_to_ebitda))+
+            kv('Dividend yield',num(v.dividend_yield_pct,2,'%'))+
+            kv('Analyst target',money(v.analyst_target))+
+            kv('Implied upside',pct(v.analyst_upside_pct), v.analyst_upside_pct>0?'up':(v.analyst_upside_pct<0?'down':''))+
+            kv('Consensus',esc(v.analyst_consensus||'—'))+
+            '<h4>Performance &amp; cash flow</h4>'+
+            kv('Revenue growth',pct(p.revenue_growth_pct), p.revenue_growth_pct>0?'up':'down')+
+            kv('Gross margin',num(p.gross_margin_pct,1,'%'))+
+            kv('Operating margin',num(p.operating_margin_pct,1,'%'))+
+            kv('Net margin',num(p.net_margin_pct,1,'%'), p.net_margin_pct>0?'up':'down')+
+            kv('Return on equity',num(p.roe_pct,1,'%'))+
+            kv('Free cash flow / share',money(p.fcf_per_share))+
+            kv('Free cash flow',money(p.fcf_total))+
+            kv('Debt / equity',num(p.debt_to_equity))+
+            kv('Current ratio',num(p.current_ratio))+
+            '<h4>Today</h4>'+
+            kv('Open',money(day.open))+kv('Day range',money(day.low)+' – '+money(day.high))+
+            kv('52-week range',money(day.year_low)+' – '+money(day.year_high))+
+            kv('Volume',day.volume?(+day.volume).toLocaleString():'—')+
+          '</div>'+
+          (d.description?'<div class="desc"><strong style="color:var(--ink)">What they do — </strong>'+esc(d.description)+'</div>':'')+
+          '<div class="note">Fundamentals from Financial Modeling Prep. The read above is four '+
+          'rules of thumb added together, not a valuation model — a cheap-looking price is often '+
+          'cheap for a reason. Headlines are categorised by keyword matching, not by reading them.</div>';
+        if((d.news||[]).length){
+          activeSym=d.ticker;
+          [].forEach.call(filters.children,function(x){x.classList.toggle('on',x.getAttribute('data-cat')==='');});
+          activeCat=''; load();
+        }
+      })
+      .catch(function(){ rbody.innerHTML='<div class="empty">Lookup failed.</div>'; });
+  }
+
+  go.onclick=function(){ activeSym=''; lookup((tick.value||'').trim().toUpperCase()); };
+  tick.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); go.onclick(); } };
+
+  // live push
+  function connect(){
+    if(!window.EventSource) { setInterval(load, 15000); return; }
+    var es=new EventSource('/api/stream');
+    es.onmessage=function(ev){
+      try{
+        var h=JSON.parse(ev.data);
+        if(activeCat && (h.categories||[]).indexOf(activeCat)<0) return;
+        if(activeSym && (h.symbols||[]).indexOf(activeSym)<0) return;
+        paint([h], true);
+      }catch(e){}
+    };
+    es.onopen=function(){ dot.className='dot on'; };
+    es.onerror=function(){ dot.className='dot off'; };
+  }
+
+  load(); connect();
+  setInterval(load, 60000);
+  setInterval(function(){
+    [].forEach.call(feed.querySelectorAll('.time'), function(el, i){
+      if(items[i]) el.textContent=ago(items[i].created_at);
+    });
+  }, 30000);
+})();
+</script>
+</body>
+</html>

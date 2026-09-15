@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: tapehawk
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    # ONE worker, deliberately. Each worker would open its own Alpaca socket
+    # and write the same headlines to the same database. The work per request
+    # here is tiny, so one worker is plenty.
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    envVars:
+      - key: ALPACA_KEY_ID
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: FMP_API_KEY
+        sync: false
