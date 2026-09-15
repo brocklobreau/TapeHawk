@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tapehawk — live market headlines</title>
+<!-- Inline so it costs no request. Without it every first page load spends a
+     round trip on /favicon.ico and logs a 404. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230B0D10'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%23FFB020'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg:#0B0D10; --surface:#12161B; --surface-2:#181D24; --line:#232A33;
@@ -48,7 +51,10 @@
   .bigwrap { max-width:1500px; margin:16px auto 0; padding:0 16px; }
   .wrap { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
           gap:16px; padding:16px; max-width:1500px; margin:0 auto; align-items:start; }
-  @media (max-width:980px){ .wrap { grid-template-columns:1fr; } }
+  /* minmax(0,…) rather than a bare 1fr: a grid track's default minimum is its
+     min-content width, so one nowrap table inside the column silently widens
+     the whole page and the phone gets a sideways scroll. */
+  @media (max-width:980px){ .wrap { grid-template-columns:minmax(0,1fr); } }
 
   .panel { background:var(--surface); border:1px solid var(--line); border-radius:11px; }
   .panel > h2 { margin:0; padding:11px 14px; font-size:12px; text-transform:uppercase;
@@ -160,6 +166,37 @@
   .kv span:last-child { font-family:var(--mono); }
   .desc { padding:0 14px 14px; color:var(--muted); font-size:12.5px; line-height:1.6; }
   .note { padding:0 14px 14px; color:var(--faint); font-size:11.5px; line-height:1.55; }
+
+  /* Earnings day. Given its own card rather than another row in the stats grid
+     because it answers a different question from the rest of the panel: not
+     "what is this worth" but "what happens when it reports". */
+  .earn { margin:12px 14px; border:1px solid rgba(255,176,32,.3); border-radius:9px;
+          background:var(--surface-2); overflow:hidden; }
+  .earn > h4 { margin:0; padding:9px 13px; font-size:11px; text-transform:uppercase;
+               letter-spacing:.06em; color:var(--accent); font-weight:650;
+               border-bottom:1px solid var(--line); }
+  .earn-top { display:flex; align-items:baseline; gap:12px; padding:12px 13px 4px; flex-wrap:wrap; }
+  .earn-big { font-family:var(--mono); font-size:29px; font-weight:700; line-height:1; }
+  .earn-lab { font-size:12.5px; color:var(--muted); min-width:0; }
+  .earn-lab b { color:var(--ink); font-weight:600; }
+  .earn-next { padding:2px 13px 10px; font-size:12.5px; color:var(--muted); }
+  .earn-next b { color:var(--ink); font-weight:600; }
+  .earn-facts { margin:0; padding:0 13px 11px 30px; color:var(--muted);
+                font-size:12.5px; line-height:1.65; }
+  /* The five columns stay on one line each; on a narrow phone the table scrolls
+     inside this wrapper rather than stretching the page. */
+  .earn-tblwrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .earn-tbl { width:100%; border-collapse:collapse; font-size:12px; min-width:330px; }
+  .earn-tbl th { text-align:right; padding:6px 8px; color:var(--faint); font-weight:600;
+                 font-size:10.5px; text-transform:uppercase; letter-spacing:.05em;
+                 border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+                 white-space:nowrap; }
+  .earn-tbl td { text-align:right; padding:5px 8px; font-family:var(--mono);
+                 border-bottom:1px solid var(--line); white-space:nowrap; }
+  .earn-tbl th:first-child, .earn-tbl td:first-child { text-align:left; }
+  .earn-tbl tr:last-child td { border-bottom:0; }
+  .earn-foot { padding:8px 13px 10px; color:var(--faint); font-size:11px; line-height:1.5; }
+  .earn-none { padding:11px 13px; color:var(--muted); font-size:12.5px; }
 </style>
 </head>
 <body>
@@ -440,16 +477,123 @@
 
   function kv(k,v,cls){ return '<div class="kv"><span>'+esc(k)+'</span><span class="'+(cls||'')+'">'+v+'</span></div>'; }
 
+  // --- earnings-day behaviour ------------------------------------------------
+  // Fetched alongside the fundamentals, painted whenever it lands. Two fetches
+  // race, and either can finish first, so both write into shared state and the
+  // painter is a no-op until its target element exists.
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function shortDate(iso){
+    // Parsed by hand on purpose: new Date('2025-01-30') is UTC midnight, which
+    // renders as the 29th for anyone west of Greenwich. This project has been
+    // bitten by exactly that once already.
+    var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||''));
+    if(!m) return '—';
+    return MON[+m[2]-1]+' '+(+m[3])+" '"+m[1].slice(2);
+  }
+  function pm(v,d){ return (v==null||isNaN(v))?'—':'±'+(+v).toFixed(d==null?1:d)+'%'; }
+  function plural(n,word){ return n+' '+word+(n===1?'':'s'); }
+
+  function earnHTML(j, price){
+    if(!j) return '';
+    var head='<div class="earn"><h4>Earnings day</h4>';
+    if(j.error) return head+'<div class="earn-none">'+esc(j.error)+'</div></div>';
+
+    var n=j.next, s=j.summary, out=head;
+    var nextLine='';
+    if(n){
+      var away = n.days_away===0 ? 'today'
+               : n.days_away===1 ? 'tomorrow'
+               : n.days_away+' days away';
+      nextLine='<div class="earn-next">Next report <b>'+esc(shortDate(n.date))+'</b> — '+
+               esc(away)+(n.time?', '+esc(n.time):'')+
+               (n.eps_est!=null?' · consensus EPS '+money(n.eps_est):'')+'</div>';
+    }
+
+    if(!s){
+      return out+'<div class="earn-none">'+
+        esc(j.note||'Not enough reported quarters to say how this stock behaves on earnings day.')+
+        '</div>'+nextLine+'</div>';
+    }
+
+    var dollars = (price && s.avg_abs_move_pct!=null)
+      ? '±$'+(price*s.avg_abs_move_pct/100).toFixed(2)+' on today’s price' : '';
+    out += '<div class="earn-top"><div class="earn-big">'+pm(s.avg_abs_move_pct)+'</div>'+
+           '<div class="earn-lab"><b>average move on earnings day</b><br>'+
+           'across its last '+plural(s.events,'report')+
+           (s.median_abs_move_pct!=null?' · median '+pm(s.median_abs_move_pct):'')+
+           (dollars?' · '+esc(dollars):'')+'</div></div>'+nextLine;
+
+    var facts=[];
+    facts.push('Moved more than ±5% on <b>'+s.over_5pct+' of '+s.events+'</b>.');
+    if(s.biggest_up_pct!=null && s.biggest_down_pct!=null){
+      facts.push('Biggest reactions: <span class="up">'+pct(s.biggest_up_pct)+'</span> and '+
+                 '<span class="down">'+pct(s.biggest_down_pct)+'</span>.');
+    }
+    facts.push('Finished up '+s.up_days+', down '+s.down_days+'.');
+    if(s.gap_sample>=3){
+      var faded=s.gap_sample-s.gap_extended;
+      facts.push('Opened with a gap of '+pm(s.avg_abs_gap_pct)+' on average; the session then '+
+                 'extended that gap <b>'+s.gap_extended+'</b> time'+(s.gap_extended===1?'':'s')+
+                 ' and gave some back <b>'+faded+'</b>.');
+    }
+    if(s.beats>0){
+      facts.push('Beat the EPS estimate <b>'+s.beats+' of '+s.events+'</b> times'+
+                 (s.beats_that_fell>0
+                   ? ' — and the stock still fell on <b>'+s.beats_that_fell+'</b> of those.'
+                   : ', and the stock rose every time.'));
+    }
+    out += '<ul class="earn-facts"><li>'+facts.join('</li><li>')+'</li></ul>';
+
+    var rows=(j.history||[]).slice(0,8).map(function(e){
+      var surprise = e.surprise_pct==null ? '—'
+        : '<span class="'+(e.surprise_pct>=0?'up':'down')+'">'+pct(e.surprise_pct)+'</span>';
+      return '<tr><td>'+esc(shortDate(e.reaction_date))+'</td>'+
+             '<td>'+(e.eps==null?'—':(+e.eps).toFixed(2))+
+               (e.eps_est==null?'':' <span style="color:var(--faint)">vs '+(+e.eps_est).toFixed(2)+'</span>')+'</td>'+
+             '<td>'+surprise+'</td>'+
+             '<td class="'+(e.gap_pct>=0?'up':'down')+'">'+pct(e.gap_pct)+'</td>'+
+             '<td class="'+(e.day_pct>=0?'up':'down')+'">'+pct(e.day_pct)+'</td></tr>';
+    }).join('');
+    if(rows){
+      out += '<div class="earn-tblwrap"><table class="earn-tbl"><thead><tr><th>Reaction</th><th>EPS</th>'+
+             '<th>Surprise</th><th>Gap</th><th>Day</th></tr></thead><tbody>'+rows+
+             '</tbody></table></div>';
+    }
+
+    var rday=j.reaction_day||{};
+    out += '<div class="earn-foot">Measured close-to-close on '+
+      esc(rday.label||'the reaction session')+
+      (rday.source==='measured'
+        ? ', identified from the whole history rather than guessed per report'
+        : ', as reported by the exchange')+
+      '. These are sizes, not directions — nothing here says which way the next one goes.</div>';
+    return out+'</div>';
+  }
+
+  var reqSeq=0, earnData=null, lastPrice=null;
+  function paintEarn(){
+    var box=document.getElementById('earnbox');
+    if(!box || !earnData) return;
+    box.innerHTML=earnHTML(earnData, lastPrice);
+  }
+
   function lookup(sym){
     if(!sym) return;
+    var seq=++reqSeq; earnData=null; lastPrice=null;
     tick.value=sym; rempty.style.display='none';
     rbody.innerHTML='<div class="empty">Loading '+esc(sym)+'…</div>';
+    fetch('/api/earnings?ticker='+encodeURIComponent(sym))
+      .then(function(r){ return r.json(); })
+      .then(function(j){ if(seq!==reqSeq) return; earnData=j; paintEarn(); })
+      .catch(function(){});
     fetch('/api/lookup?ticker='+encodeURIComponent(sym))
       .then(function(r){return r.json().then(function(j){return {ok:r.ok,b:j};});})
       .then(function(res){
+        if(seq!==reqSeq) return;
         if(!res.ok){ rbody.innerHTML='<div class="empty">'+esc(res.b.error||'Lookup failed.')+'</div>'; return; }
         var d=res.b, v=d.valuation||{}, p=d.performance||{}, day=d.day||{}, rd=d.read||{};
         var chg=d.change_pct;
+        lastPrice=d.price;
         rbody.innerHTML =
           '<div class="rhead"><h3 class="rname">'+esc(d.name||d.ticker)+' <span class="rtick">'+esc(d.ticker)+'</span></h3>'+
           '<p class="rsub">'+esc([d.sector,d.industry,d.exchange].filter(Boolean).join(' · '))+'</p>'+
@@ -457,6 +601,7 @@
           (chg!=null?'<span class="rchg '+(chg>=0?'up':'down')+'">'+pct(chg)+'</span>':'')+'</div></div>'+
           (rd.read?'<div class="read"><h4>'+esc(rd.read)+'</h4><ul>'+
             (rd.notes||[]).map(function(n){return '<li>'+esc(n)+'</li>';}).join('')+'</ul></div>':'')+
+          '<div id="earnbox"></div>'+
           '<div class="grid">'+
             '<h4>Valuation</h4>'+
             kv('Market cap',money(d.market_cap))+kv('P/E',num(v.pe,1))+
@@ -485,6 +630,9 @@
           '<div class="note">Fundamentals from Financial Modeling Prep. The read above is four '+
           'rules of thumb added together, not a valuation model — a cheap-looking price is often '+
           'cheap for a reason. Headlines are categorised by keyword matching, not by reading them.</div>';
+        // The earnings fetch may well have finished before this one; if it did,
+        // its target element only exists now.
+        paintEarn();
         if((d.news||[]).length){
           activeSym=d.ticker;
           renderSymFilter();

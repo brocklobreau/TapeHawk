@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 from flask import Flask, Response, request, send_from_directory
 
+import earnings
 import news_stream
 import outcomes
 import research
@@ -157,6 +158,26 @@ def api_lookup():
     except Exception as e:
         log(f"lookup failed for {raw}: {e}")
         return {"error": "Lookup failed — try again shortly."}, 502
+
+
+@app.route("/api/earnings")
+def api_earnings():
+    """Earnings-day behaviour, on its own endpoint rather than folded into
+    /api/lookup. It costs two more FMP calls and one of them pulls six years of
+    daily bars; bolting that onto the lookup would make the whole research
+    panel wait on it. The browser fires both at once and this block fills in
+    a moment later, which is the difference between a page that feels instant
+    and a page that feels like every other finance site."""
+    raw = (request.args.get("ticker") or "").strip().upper()
+    if not raw or len(raw) > 12 or not all(c.isalnum() or c in ".-" for c in raw):
+        return {"error": "Enter a ticker symbol."}, 400
+    try:
+        return earnings.lookup(raw)
+    except earnings.EarningsError as e:
+        return {"error": str(e)}, 404
+    except Exception as e:
+        log(f"earnings lookup failed for {raw}: {e}")
+        return {"error": "Earnings history unavailable right now."}, 502
 
 
 @app.route("/scoreboard")
