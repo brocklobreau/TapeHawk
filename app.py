@@ -184,6 +184,14 @@ def start_once():
             return
         _started = True
         store.init()
+        # Score anything that arrived before the Big News feature shipped, so
+        # the rail reflects the whole archive rather than only what happens to
+        # land after a deploy.
+        try:
+            import classify
+            store.backfill_importance(classify.importance, log=log)
+        except Exception as e:
+            log(f"importance backfill skipped: {e}")
         news_stream.start(log=log)
         log("tapehawk: started")
 

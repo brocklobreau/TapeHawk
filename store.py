@@ -185,6 +185,38 @@ def stats():
             "best_latency_ms": lat["m"], "newest_id": newest}
 
 
+def backfill_importance(score_fn, log=print):
+    """Score rows that were stored before importance existed.
+
+    Without this the Big News rail stays empty for as long as the archive
+    takes to turn over -- including a genuine circuit-breaker halt that had
+    already come through the wire. Rows never scored are identified by a NULL
+    `reasons`, because scoring always writes that column even when the list
+    is empty; a row that legitimately scored zero has "[]" there and is left
+    alone rather than being scored twice.
+    """
+    c = _conn()
+    rows = c.execute("SELECT id, headline, symbols, categories FROM headlines "
+                     "WHERE reasons IS NULL").fetchall()
+    if not rows:
+        return 0
+    done = 0
+    for r in rows:
+        try:
+            syms = json.loads(r["symbols"] or "[]")
+            cats = json.loads(r["categories"] or "[]")
+            imp = score_fn(r["headline"], syms, cats)
+            c.execute("UPDATE headlines SET importance = ?, reasons = ? WHERE id = ?",
+                      (int(imp["score"]), json.dumps(imp["reasons"]), r["id"]))
+            done += 1
+        except Exception:
+            # One unscoreable row must not abort the whole backfill.
+            continue
+    c.commit()
+    log(f"store: scored {done} headline(s) stored before importance existed")
+    return done
+
+
 def prune(keep_days=45):
     """Keep the archive bounded. Render's smallest disk is 1GB; headlines are
     tiny but unbounded growth is still how a service dies six months from now

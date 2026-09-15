@@ -133,7 +133,7 @@
   </div>
 </header>
 
-<div class="bigwrap" id="bigwrap" hidden>
+<div class="bigwrap" id="bigwrap">
   <section class="panel">
     <h2>⚡ Big news <span style="color:var(--faint);font-weight:400">— the ones that actually matter</span></h2>
     <div id="bignews"></div>
@@ -261,13 +261,25 @@
   function paintBig(list, prepend){
     var box=document.getElementById('bignews');
     if(!prepend) { box.innerHTML=''; bigSeen={}; }
+    var ph = box.querySelector('.empty');
+    if (ph && list.length) ph.remove();
     list.forEach(function(h){
       if(bigSeen[h.id]) return; bigSeen[h.id]=1;
       var el=bigRow(h);
       if(prepend) box.insertBefore(el, box.firstChild); else box.appendChild(el);
     });
     while(box.children.length>8) box.removeChild(box.lastChild);
-    document.getElementById('bigwrap').hidden = box.children.length===0;
+    // Show the section with an honest empty state rather than hiding it.
+    // A missing section is indistinguishable from a broken one -- the first
+    // question it produced was "where is the big news section?", which is
+    // exactly the wrong question for a feature that is working correctly and
+    // simply has nothing to report yet.
+    if (!box.children.length) {
+      box.innerHTML = '<div class="empty">Nothing major yet. This fills when '+
+        'something genuinely big lands — a large deal, an FDA decision, a '+
+        'trading halt — and stays empty the rest of the time on purpose.</div>';
+    }
+    document.getElementById('bigwrap').hidden = false;
   }
 
   function loadBig(){
