@@ -189,7 +189,8 @@ def start_once():
         # land after a deploy.
         try:
             import classify
-            store.backfill_importance(classify.importance, log=log)
+            store.backfill_importance(classify.importance, classify.tone,
+                                      classify.impact, log=log)
         except Exception as e:
             log(f"importance backfill skipped: {e}")
         news_stream.start(log=log)

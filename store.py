@@ -48,7 +48,11 @@ CREATE TABLE IF NOT EXISTS headlines (
   is_noise     INTEGER DEFAULT 0,
   importance   INTEGER DEFAULT 0,
   reasons      TEXT,
-  content      TEXT
+  content      TEXT,
+  tone         TEXT,
+  tone_reasons TEXT,
+  impact_level TEXT,
+  impact_note  TEXT
 );
 """
 
@@ -78,7 +82,9 @@ def _conn():
         # taking the service down on deploy.
         have = {r["name"] for r in c.execute("PRAGMA table_info(headlines)")}
         for col, ddl in (("importance", "INTEGER DEFAULT 0"), ("reasons", "TEXT"),
-                         ("content", "TEXT")):
+                         ("content", "TEXT"), ("tone", "TEXT"),
+                         ("tone_reasons", "TEXT"), ("impact_level", "TEXT"),
+                         ("impact_note", "TEXT")):
             if col not in have:
                 c.execute(f"ALTER TABLE headlines ADD COLUMN {col} {ddl}")
         c.executescript(INDEX_SQL)          # only now are all columns present
@@ -104,8 +110,9 @@ def insert(article):
         """INSERT OR IGNORE INTO headlines
            (alpaca_id, created_at, received_at, latency_ms, headline, summary,
             author, source, url, symbols, categories, is_noise,
-            importance, reasons, content)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            importance, reasons, content, tone, tone_reasons,
+            impact_level, impact_note)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (article.get("alpaca_id"), article["created_at"], article["received_at"],
          article.get("latency_ms"), article["headline"], article.get("summary"),
          article.get("author"), article.get("source"), article.get("url"),
@@ -114,7 +121,9 @@ def insert(article):
          1 if article.get("is_noise") else 0,
          int(article.get("importance") or 0),
          json.dumps(article.get("reasons") or []),
-         article.get("content")))
+         article.get("content"),
+         article.get("tone"), json.dumps(article.get("tone_reasons") or []),
+         article.get("impact_level"), article.get("impact_note")))
     c.commit()
     return cur.rowcount > 0
 
@@ -125,6 +134,7 @@ def _row(r):
     d["categories"] = json.loads(d.get("categories") or "[]")
     d["reasons"] = json.loads(d.get("reasons") or "[]")
     d["has_content"] = bool(d.get("content"))
+    d["tone_reasons"] = json.loads(d.get("tone_reasons") or "[]")
     d["big"] = (d.get("importance") or 0) >= 5
     d["is_noise"] = bool(d.get("is_noise"))
     return d
@@ -143,7 +153,8 @@ def recent(limit=100, since_id=None, symbol=None, category=None,
            include_noise=False, search=None, min_importance=None):
     sql = ("SELECT id, alpaca_id, created_at, received_at, latency_ms, headline, "
            "summary, author, source, url, symbols, categories, is_noise, "
-           "importance, reasons FROM headlines WHERE 1=1")
+           "importance, reasons, tone, tone_reasons, impact_level, impact_note "
+           "FROM headlines WHERE 1=1")
     args = []
     if not include_noise:
         sql += " AND is_noise = 0"
@@ -185,7 +196,7 @@ def stats():
             "best_latency_ms": lat["m"], "newest_id": newest}
 
 
-def backfill_importance(score_fn, log=print):
+def backfill_importance(score_fn, tone_fn=None, impact_fn=None, log=print):
     """Score rows that were stored before importance existed.
 
     Without this the Big News rail stays empty for as long as the archive
@@ -197,7 +208,7 @@ def backfill_importance(score_fn, log=print):
     """
     c = _conn()
     rows = c.execute("SELECT id, headline, symbols, categories FROM headlines "
-                     "WHERE reasons IS NULL").fetchall()
+                     "WHERE reasons IS NULL OR tone IS NULL").fetchall()
     if not rows:
         return 0
     done = 0
@@ -206,8 +217,13 @@ def backfill_importance(score_fn, log=print):
             syms = json.loads(r["symbols"] or "[]")
             cats = json.loads(r["categories"] or "[]")
             imp = score_fn(r["headline"], syms, cats)
-            c.execute("UPDATE headlines SET importance = ?, reasons = ? WHERE id = ?",
-                      (int(imp["score"]), json.dumps(imp["reasons"]), r["id"]))
+            tn = tone_fn(r["headline"]) if tone_fn else {"direction": None, "reasons": []}
+            ip = impact_fn(r["headline"], syms) if impact_fn else {"level": None, "note": None}
+            c.execute("UPDATE headlines SET importance = ?, reasons = ?, tone = ?, "
+                      "tone_reasons = ?, impact_level = ?, impact_note = ? WHERE id = ?",
+                      (int(imp["score"]), json.dumps(imp["reasons"]),
+                       tn.get("direction"), json.dumps(tn.get("reasons") or []),
+                       ip.get("level"), ip.get("note"), r["id"]))
             done += 1
         except Exception:
             # One unscoreable row must not abort the whole backfill.

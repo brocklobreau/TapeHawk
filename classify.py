@@ -409,3 +409,218 @@ def importance(title, symbols=None, categories=None):
 
     return {"score": score, "big": score >= 5, "reasons": reasons,
             "dollars": dollars}
+
+
+# --- good news or bad news? -----------------------------------------------
+#
+# Harder than importance, and the failure mode is worse: a wrong "POSITIVE"
+# on a headline someone is about to act on does more damage than no label.
+# So "unclear" is a first-class answer here, not a fallback.
+#
+# Three cases that break naive sentiment scoring, all handled explicitly:
+#   * A TRADING HALT has no direction. "Halted to the upside, up 271%" and
+#     "halted pending news" are the same event with opposite meanings.
+#   * An ACQUISITION is good for the target and expensive for the acquirer --
+#     one headline, opposite signs depending which ticker you hold.
+#   * "FDA" appears in approvals AND rejections. The verb carries the sign.
+#
+# An explicit price move outranks vocabulary, because it is the market's own
+# verdict rather than our inference from word choice.
+
+_POS_PATTERNS = (
+    (r"\b(?:surges?|soars?|jumps?|rallies|rallied|climbs?|spikes?)\b", "rising"),
+    (r"\bto\s+the\s+upside\b", "moving up"),
+    (r"\b(?:fda|ema|regulatory)\s+approv", "regulatory approval"),
+    (r"\bapprov(?:es|ed|al)\b[^.]{0,40}\b(?:drug|therapy|treatment|vaccine)\b", "approval"),
+    (r"\bmeets?\s+primary\s+endpoint\b", "trial succeeded"),
+    (r"\bbeats?\b[^.]{0,25}\b(?:estimates?|expectations?|consensus)\b", "beat expectations"),
+    (r"\braises?\s+(?:full.year\s+|fy\s+)?(?:guidance|outlook|forecast)\b", "guidance raised"),
+    (r"\bupgrade[sd]?\b", "analyst upgrade"),
+    (r"\braises?\s+price\s+target\b", "target raised"),
+    (r"\b(?:wins?|awarded|secures?)\b[^.]{0,30}\b(?:contract|order|deal|bid)\b", "won business"),
+    (r"\bbuyback\b|\brepurchase\s+program\b", "buyback"),
+    (r"\b(?:raises?|initiates?|increases?)\s+dividend\b", "dividend raised"),
+    (r"\brecord\s+(?:revenue|profit|quarter|earnings|sales)\b", "record results"),
+)
+
+_NEG_PATTERNS = (
+    (r"\b(?:plunges?|plummets?|tumbles?|sinks?|slides?|crashes?|slumps?)\b", "falling"),
+    (r"\bto\s+the\s+downside\b", "moving down"),
+    (r"\btrading\s+lower\b", "trading lower"),
+    (r"\bcomplete\s+response\s+letter\b|\b(?:fda|regulator|ema)\s+reject|"
+     r"\brejects?\s+(?:the\s+)?(?:approval|application|filing)\b", "regulatory rejection"),
+    (r"\bfails?\s+(?:to\s+meet\s+)?(?:primary\s+)?endpoint\b", "trial failed"),
+    (r"\bmisses?\b[^.]{0,25}\b(?:estimates?|expectations?|consensus)\b", "missed expectations"),
+    (r"\b(?:cuts?|slashes?|lowers?|withdraws?|suspends?)\b[^.]{0,20}\b(?:guidance|outlook|forecast)\b",
+     "guidance cut"),
+    (r"\bdowngrade[sd]?\b", "analyst downgrade"),
+    (r"\blowers?\s+price\s+target\b", "target cut"),
+    (r"\bbankrupt|\bchapter\s+11\b|\bdefaults?\s+on\b", "insolvency"),
+    (r"\b(?:lawsuit|sued|investigation|probe|subpoena|antitrust)\b", "legal trouble"),
+    (r"\brecall(?:s|ed|ing)?\b", "recall"),
+    (r"\blayoffs?\b|\bcuts?\s+\d+.{0,12}\bjobs\b", "layoffs"),
+    (r"\b(?:suspends?|cuts?|eliminates?)\s+dividend\b", "dividend cut"),
+    (r"\bdelisted\b|\bdelisting\b", "delisting"),
+    (r"\bshort\s+seller\b|\bfraud\b", "fraud allegation"),
+)
+
+# Events whose direction genuinely cannot be read off the headline.
+_AMBIGUOUS = (
+    (r"\btrading\s+halted\b|\bshares?\s+halted\b|\bcircuit\s+breaker\b",
+     "a halt can be up or down"),
+    (r"\b(?:acquires?|acquisition|to\s+acquire|merger|takeover)\b",
+     "good for the target, costly for the buyer"),
+)
+
+_POS_RE = [(re.compile(p, re.I), why) for p, why in _POS_PATTERNS]
+_NEG_RE = [(re.compile(p, re.I), why) for p, why in _NEG_PATTERNS]
+_AMB_RE = [(re.compile(p, re.I), why) for p, why in _AMBIGUOUS]
+
+# Negation guard. "Novavax Vaccine FAILS TO MEET Primary Endpoint" matched
+# the POSITIVE pattern for "meets primary endpoint" and came out as mixed --
+# the worst possible answer for an unambiguously bad headline. The same trap
+# waits in "fails to win contract" and "did not beat estimates", so this is
+# fixed once, generally, rather than per verb: any positive match whose
+# immediately preceding words negate it is discarded.
+_NEGATORS = re.compile(
+    r"\b(?:fail(?:s|ed|ing)?\s+to|did\s*n[o']t|does\s*n[o']t|do\s*n[o']t|won[o']t|"
+    r"unable\s+to|denied|rejects?|rejected|refuses?\s+to|falls?\s+short\s+of|"
+    r"no\s+longer|without)\s*$", re.I)
+_NEG_LOOKBACK = 28
+
+
+def _negated(text, match_start):
+    """Was this positive phrase negated by what comes immediately before it?"""
+    before = text[max(0, match_start - _NEG_LOOKBACK):match_start]
+    return bool(_NEGATORS.search(before))
+
+
+_MOVE_UP = re.compile(r"\b(?:up|gain(?:s|ed)?|rose|rises?|climb(?:s|ed)?)\s+(\d+(?:\.\d+)?)%", re.I)
+_MOVE_DOWN = re.compile(r"\b(?:down|fell|falls?|drop(?:s|ped)?|lost|loses?)\s+(\d+(?:\.\d+)?)%", re.I)
+
+
+# How a negated positive should read. Without this the output was literally
+# "failed to approval", which looks like a bug even when the verdict is right.
+_NEGATED_PHRASING = {
+    "won business": "failed to win the business",
+    "beat expectations": "did not beat expectations",
+    "trial succeeded": "did not hit the endpoint",
+    "regulatory approval": "approval refused",
+    "approval": "approval refused",
+    "guidance raised": "guidance not raised",
+    "analyst upgrade": "no upgrade",
+    "target raised": "target not raised",
+    "record results": "no record result",
+    "rising": "not rising",
+}
+
+
+def tone(title):
+    """{"direction": positive|negative|unclear, "reasons": [...]}
+
+    Conservative by design. When positive and negative signals both fire and
+    neither is an explicit price move, the answer is "unclear" -- mixed
+    evidence is a real state, and flattening it to a guess is how a label
+    stops being worth reading."""
+    t = normalize(title)
+
+    up, down = _MOVE_UP.search(t), _MOVE_DOWN.search(t)
+    if up and not down:
+        return {"direction": "positive", "reasons": [f"stock up {up.group(1)}%"]}
+    if down and not up:
+        return {"direction": "negative", "reasons": [f"stock down {down.group(1)}%"]}
+
+    pos, neg = [], [why for r, why in _NEG_RE if r.search(t)]
+    for r, why in _POS_RE:
+        m = r.search(t)
+        if not m:
+            continue
+        if _negated(t, m.start()):
+            # A negated positive is not merely "not positive" -- it is
+            # negative evidence. "Company Fails To Win Air Force Contract"
+            # read as "unclear" until this was recorded on the negative side,
+            # which is a worse answer than the false positive it replaced.
+            neg.append(_NEGATED_PHRASING.get(why, "failed to " + why))
+        else:
+            pos.append(why)
+    if pos and not neg:
+        return {"direction": "positive", "reasons": pos[:3]}
+    if neg and not pos:
+        return {"direction": "negative", "reasons": neg[:3]}
+    if pos and neg:
+        return {"direction": "unclear",
+                "reasons": ["mixed: " + ", ".join(pos[:2] + neg[:2])]}
+    for r, why in _AMB_RE:
+        if r.search(t):
+            return {"direction": "unclear", "reasons": [why]}
+    return {"direction": "unclear", "reasons": []}
+
+
+# --- what is this likely to do? -------------------------------------------
+#
+# Deliberately qualitative. It would be easy to print "expected move: 4.2%"
+# and it would be fiction -- nothing here knows the company's market cap, its
+# float, what was already priced in, or what the tape is doing. A made-up
+# number is worse than no number because it looks like knowledge.
+#
+# What this DOES say is what KIND of reaction the event type usually
+# produces, and on what timescale, with the reasoning attached. The timing
+# claim is not invented either: measured on 6,358 real headlines against
+# 5-minute bars earlier in this project, 42% of the two-hour move was spent
+# within 5 minutes and 56% within 15. That is why every note below points at
+# the first few minutes rather than the rest of the day.
+
+_IMPACT_RULES = (
+    ("halt", r"\btrading\s+halted\b|\bshares?\s+halted\b|\bcircuit\s+breaker\b", "high",
+     "Halts are called for disorderly moves or pending news. Expect a large "
+     "gap when trading resumes — the size is unknowable until it does."),
+    ("clinical", r"\bfda\s+approv|\bcomplete\s+response\s+letter\b|\bfda\s+reject|"
+     r"\b(?:meets?|fails?)\b[^.]{0,30}\bendpoint\b", "high",
+     "Regulatory decisions reprice drug developers hard, and the smaller the "
+     "company the harder — a single approval can be most of the thesis."),
+    ("insolvency", r"\bbankrupt|\bchapter\s+11\b|\bdelisted\b|\bdefaults?\s+on\b", "high",
+     "Existential events. Equity holders are usually last in line."),
+    ("guidance", r"\b(?:cuts?|slashes?|withdraws?|suspends?|raises?)\b[^.]{0,20}"
+     r"\b(?:guidance|outlook|forecast)\b", "high",
+     "Guidance changes move stocks the same session — they reset what every "
+     "model downstream is built on."),
+    ("m&a", r"\b(?:acquires?|acquisition|to\s+acquire|merger|takeover|tender\s+offer)\b", "high",
+     "Targets typically jump toward the offer price and stay there; acquirers "
+     "often drift the other way on the cost."),
+    ("bigmoney", r"\$\s?\d[\d,.]*\s*(?:billion|bn|b)\b", "medium",
+     "Large contracts matter in proportion to the company's size — the same "
+     "number is transformative for a mid-cap and a rounding error for a mega-cap."),
+    ("earnings", r"\b(?:beats?|misses?)\b[^.]{0,25}\b(?:estimates?|expectations?)\b", "medium",
+     "Earnings surprises usually move the stock immediately, then fade or "
+     "extend depending on what management says next."),
+    ("legal", r"\b(?:lawsuit|sued|investigation|probe|antitrust|recall|fraud)\b", "medium",
+     "Legal and regulatory trouble tends to grind rather than gap — the cost "
+     "is rarely knowable on day one."),
+    ("leadership", r"\bceo\s+(?:resigns|steps?\s+down|ousted|fired)\b", "medium",
+     "Leadership exits move stocks most when unexpected or unexplained."),
+    ("analyst", r"\bupgrade[sd]?\b|\bdowngrade[sd]?\b|\bprice\s+target\b", "low",
+     "Broker notes usually produce a small, short-lived move unless the call "
+     "is a real outlier."),
+)
+_IMPACT_RE = [(k, re.compile(p, re.I), lvl, note) for k, p, lvl, note in _IMPACT_RULES]
+
+IMPACT_LABEL = {"high": "Likely a big mover",
+                "medium": "Should move the stock",
+                "low": "Probably a small move"}
+
+
+def impact(title, symbols=None):
+    """{"level": high|medium|low|None, "label", "note", "breadth"}
+
+    First matching rule wins, and they are ordered by how decisively the
+    event type usually moves a price. Returns level None when nothing
+    recognisable fires, rather than inventing a guess."""
+    t = normalize(title)
+    n = len(symbols or [])
+    breadth = (f"{n} tickers affected" if n >= 4
+               else (", ".join(symbols) if symbols else None))
+    for _key, rx, level, note in _IMPACT_RE:
+        if rx.search(t):
+            return {"level": level, "label": IMPACT_LABEL[level],
+                    "note": note, "breadth": breadth}
+    return {"level": None, "label": None, "note": None, "breadth": breadth}

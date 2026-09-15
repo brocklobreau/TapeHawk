@@ -137,6 +137,8 @@ def _handle(msg, log):
     cats = classify.classify_headline(headline)
     noise = classify.is_noise(headline)
     imp = classify.importance(headline, msg.get("symbols") or [], cats)
+    tn = classify.tone(headline)
+    ip = classify.impact(headline, msg.get("symbols") or [])
 
     article = {
         "alpaca_id": msg.get("id"),
@@ -161,6 +163,10 @@ def _handle(msg, log):
         "importance": imp["score"],
         "reasons": imp["reasons"],
         "big": imp["big"],
+        "tone": tn["direction"],
+        "tone_reasons": tn["reasons"],
+        "impact_level": ip["level"],
+        "impact_note": ip["note"],
     }
 
     with _lock:
@@ -192,7 +198,9 @@ def _handle(msg, log):
         syms = ",".join(article["symbols"][:4]) or "-"
         log(f"news [{lat}] [{tags}] [{syms}]"
             + (" FILTERED" if noise else "")
-            + (f" ** BIG {imp['score']}: {'; '.join(imp['reasons'])} **" if imp["big"] else "")
+            + (f" ** BIG {imp['score']} {tn['direction'].upper()}"
+               f"{'/' + ip['level'] if ip['level'] else ''}: "
+               f"{'; '.join(imp['reasons'])} **" if imp["big"] else "")
             + f" {headline[:96]}")
 
     # Only push genuinely new, non-filler headlines to open pages. A repeat of

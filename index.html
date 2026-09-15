@@ -98,6 +98,16 @@
   .why b { color:var(--accent); font-weight:600; }
   .score { font-family:var(--mono); font-size:10.5px; color:var(--accent);
            border:1px solid rgba(255,176,32,.42); border-radius:4px; padding:1px 5px; }
+  .tone { font-size:10.5px; font-weight:700; letter-spacing:.04em; padding:2px 7px;
+          border-radius:4px; text-transform:uppercase; }
+  .tone.positive { background:rgba(63,191,95,.16); color:var(--good); }
+  .tone.negative { background:rgba(240,74,74,.16); color:var(--bad); }
+  .tone.unclear  { background:var(--surface-2); color:var(--muted); }
+  .impact { margin-top:6px; font-size:11.5px; color:var(--muted); line-height:1.5; }
+  .impact b { font-weight:700; }
+  .impact.high b   { color:var(--accent); }
+  .impact.medium b { color:var(--ink); }
+  .impact.low b    { color:var(--muted); }
 
   .rhead { padding:14px; border-bottom:1px solid var(--line); }
   .rname { font-size:19px; font-weight:700; margin:0; }
@@ -213,6 +223,10 @@
     }).join('');
     var syms=(h.symbols||[]).slice(0,6).map(function(s){
       return '<span class="sym" data-sym="'+esc(s)+'">'+esc(s)+'</span>'; }).join('');
+    var tdot = (h.tone==='positive'||h.tone==='negative')
+      ? '<span class="tone '+esc(h.tone)+'" title="'+
+        esc((h.tone_reasons||[]).join(', ')||h.tone)+'">'+
+        (h.tone==='positive'?'+':'−')+'</span>' : '';
     var lat = (h.latency_ms!=null && h.latency_ms>=0 && h.latency_ms<60000)
       ? '<span class="lat">'+(h.latency_ms/1000).toFixed(2)+'s</span>' : '';
     var title = h.url ? '<a href="'+esc(h.url)+'" target="_blank" rel="noopener noreferrer">'+esc(h.headline)+'</a>'
@@ -220,7 +234,7 @@
     var d=document.createElement('div');
     d.className='item'+(isNew?' new':'');
     d.setAttribute('data-id', h.id);
-    d.innerHTML='<div class="meta"><span class="time">'+esc(ago(h.created_at))+'</span>'+lat+tags+syms+'</div>'+
+    d.innerHTML='<div class="meta"><span class="time">'+esc(ago(h.created_at))+'</span>'+lat+tdot+tags+syms+'</div>'+
                 '<div class="headline">'+title+'</div>'+
                 (h.source?'<div class="src">'+esc(h.source)+(h.author?' · '+esc(h.author):'')+'</div>':'')+
                 '<span class="expand">Read the story ▾</span>';
@@ -247,12 +261,23 @@
                       : esc(h.headline);
     var why = (h.reasons||[]).length
       ? '<div class="why"><b>Flagged because:</b> '+esc(h.reasons.join(' · '))+'</div>' : '';
+    var toneTxt = {positive:'Positive', negative:'Negative', unclear:'Direction unclear'};
+    var tn = h.tone
+      ? '<span class="tone '+esc(h.tone)+'">'+esc(toneTxt[h.tone]||h.tone)+'</span>' : '';
+    var imp = h.impact_note
+      ? '<div class="impact '+esc(h.impact_level||'')+'"><b>'+
+        esc({high:'Likely a big mover',medium:'Should move the stock',
+             low:'Probably a small move'}[h.impact_level]||'')+
+        '.</b> '+esc(h.impact_note)+'</div>' : '';
+    var toneWhy = (h.tone_reasons||[]).length
+      ? '<div class="impact"><b>Read as '+esc(h.tone)+':</b> '+
+        esc(h.tone_reasons.join(' · '))+'</div>' : '';
     var d=document.createElement('div');
     d.className='big-item';
     d.setAttribute('data-id', h.id);
     d.innerHTML='<div class="meta"><span class="time">'+esc(ago(h.created_at))+'</span>'+
-                '<span class="score">'+(h.importance||0)+'</span>'+syms+'</div>'+
-                '<div class="big-head">'+title+'</div>'+why+
+                '<span class="score">'+(h.importance||0)+'</span>'+tn+syms+'</div>'+
+                '<div class="big-head">'+title+'</div>'+why+toneWhy+imp+
                 '<span class="expand">Read the story ▾</span>';
     return d;
   }
