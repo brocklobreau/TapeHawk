@@ -126,7 +126,12 @@ def _handle(msg, log):
         if -5000 <= delta <= 3600_000:
             latency_ms = int(delta)
 
-    headline = (msg.get("headline") or "").strip()
+    # Normalise before storing, not just before matching. The wire sends
+    # "What&#39;s Going On With Robinhood Stock" and curly apostrophes; the
+    # page HTML-escapes whatever it is given, so an un-normalised headline
+    # renders literally as "What&#39;s" in the feed. Cleaning at ingest fixes
+    # the display AND means the stored text is what the classifier judged.
+    headline = classify.normalize(msg.get("headline")).strip()
     if not headline:
         return
     cats = classify.classify_headline(headline)
@@ -138,7 +143,7 @@ def _handle(msg, log):
         "received_at": now.isoformat(),
         "latency_ms": latency_ms,
         "headline": headline,
-        "summary": (msg.get("summary") or "")[:600] or None,
+        "summary": classify.normalize(msg.get("summary"))[:600] or None,
         "author": msg.get("author"),
         "source": msg.get("source"),
         "url": msg.get("url"),

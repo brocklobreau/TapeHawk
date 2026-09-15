@@ -18,6 +18,7 @@ mentions a Phase 3 trial. It cannot tell you the trial succeeded, that the
 drug matters, or that the market has not already priced it. A "clinical" tag
 is a pointer to go read the article, never a substitute for reading it.
 """
+import html
 import re
 
 # Category -> the words that flag it. Ordered most-specific first so a
@@ -40,11 +41,26 @@ CATALYST_PATTERNS = (
         r"\bearnings\b", r"\bq[1-4]\b", r"\bquarterly\s+results?\b", r"\bbeats?\s+estimates?\b",
         r"\bmisses?\s+estimates?\b", r"\bguidance\b", r"\boutlook\b", r"\brevenue\s+(?:rose|fell|grew)",
         r"\braises?\s+(?:full.year|fy|guidance|outlook)", r"\bcuts?\s+(?:guidance|outlook)",
+        # Executives give guidance in prose, not in the word "guidance".
+        # "Gilead Exec Says HIV Market Growth Should Normalize To 2%-3%" is
+        # guidance in every sense except the vocabulary the pattern wanted.
+        r"\b(?:ceo|cfo|exec(?:utive)?)\b.*\bsays\b.*\b(?:expects?|growth|margin|demand|sales|revenue|costs?)\b",
+        r"\bsays?\s+(?:it\s+)?expects?\b", r"\bexpects?\s+(?:to|its|higher|lower|full)\b",
+        r"\bshould\s+(?:normalize|improve|accelerate|moderate)\b",
+        r"\breaffirms?\b", r"\bnarrows?\s+(?:guidance|outlook|range)\b",
     )),
     ("contract", (
         r"\bcontract\b", r"\bawarded\b", r"\border\s+(?:worth|valued)", r"\bpartnership\b",
         r"\bcollaborat", r"\blicensing\s+(?:deal|agreement)", r"\bsupply\s+agreement\b",
         r"\bjoint\s+venture\b", r"\bwins?\s+deal\b",
+        # Verb forms. The live feed carried "Gilead And PAHO Partner To
+        # Expand..." and "Japan Wind Order Lifts GE Vernova" -- both real
+        # commercial events, both missed because the patterns only had the
+        # noun forms "partnership" and "contract".
+        r"\bpartners?\s+(?:with|to)\b", r"\bteams?\s+up\s+with\b",
+        r"\bsigns?\s+(?:a\s+)?(?:deal|agreement|contract|mou)\b",
+        r"\b(?:wind|defense|supply|equipment)?\s*orders?\s+(?:lifts?|boosts?|worth|from|for)\b",
+        r"\bselected\s+by\b", r"\bwins?\s+(?:contract|order|bid|tender)\b",
     )),
     ("legal", (
         r"\blawsuit\b", r"\bsued\b", r"\bsues\b", r"\blitigation\b", r"\binvestigation\b",
@@ -131,14 +147,42 @@ NOISE_PATTERNS = (
     r"\btop\s+\d+\s+.*\bstocks?\b.*\b(?:buy|watch|consider)\b",
     r"\binsights?\s+into\b.*\banalyst\s+ratings\b",
     r"\bhow\s+is\s+the\s+market\s+feeling\s+about\b",
+    # Options-income listicles. "How To Earn $500 A Month From MillerKnoll
+    # Stock Ahead Of Q1 Earnings" was tagged as EARNINGS by the category
+    # matcher, which is worse than missing it -- filler promoted into a real
+    # category is filler the filters cannot hide.
+    r"\bhow\s+to\s+earn\s+\$[\d,]+\s+(?:a|per)\s+(?:month|year|week)\b",
+    r"\bhow\s+much\s+you\s+would\s+have\s+made\b",
+    r"\bearn\s+\$[\d,]+\s+(?:a|per)\s+month\s+from\b",
 )
 
 _NOISE_RE = [re.compile(p, re.I) for p in NOISE_PATTERNS]
 _CAT_RE = [(cat, [re.compile(p, re.I) for p in pats]) for cat, pats in CATALYST_PATTERNS]
 
+# Wire copy does not arrive in plain ASCII, and every pattern above is written
+# in plain ASCII. Benzinga sends curly apostrophes and HTML entities, so
+# "Here's How Much You Would Have Made..." arrives as "Here\u2019s ..." or as
+# "Here&#39;s ..." -- neither of which matches an apostrophe written as '.
+#
+# This is not hypothetical tidying. That exact headline reached the live feed
+# on 2026-09-15 and was NOT filtered, because the filter was looking for a
+# character the wire never sends. Normalising first is the difference between
+# a filter that works on test data and one that works on the wire.
+_SUBS = {
+    "\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"',
+    "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u00a0": " ",
+}
+
+
+def normalize(text):
+    t = html.unescape(str(text or ""))
+    for bad, good in _SUBS.items():
+        t = t.replace(bad, good)
+    return t
+
 
 def is_noise(title):
-    t = title or ""
+    t = normalize(title)
     return any(r.search(t) for r in _NOISE_RE)
 
 
@@ -146,7 +190,7 @@ def classify_headline(title):
     """Every category a headline matches, most-specific first. Empty list
     means nothing recognisable fired -- which is information too: it is
     usually commentary rather than an event."""
-    t = title or ""
+    t = normalize(title)
     return [cat for cat, regexes in _CAT_RE if any(r.search(t) for r in regexes)]
 
 
