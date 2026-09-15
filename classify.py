@@ -28,7 +28,15 @@ CATALYST_PATTERNS = (
     ("clinical", (
         r"\bphase\s*(?:1|2|3|i{1,3})\b", r"\bclinical\s+trial", r"\btrial\s+results?\b",
         r"\btopline\b", r"\bprimary\s+endpoint", r"\befficacy\b", r"\bvaccine\b",
-        r"\bfda\b", r"\bema\b", r"\bapproval\b", r"\bapproved\b", r"\bbreakthrough\s+therapy",
+        r"\bfda\b", r"\bema\b", r"\bbreakthrough\s+therapy",
+        # "approval" and "approved" used to be matched bare, which tagged
+        # "U.S. Treasury's Bessent Says If Congressional Approval Is Needed..."
+        # as REGULATORY / CLINICAL on the live feed. A visibly wrong tag on a
+        # macro headline costs more trust than a missed tag on a real one, so
+        # these now require drug/regulator context.
+        r"\b(?:fda|ema|mhra|regulatory|marketing|drug)\s+approv",
+        r"\bapprov(?:es|ed|al)\b[^.]{0,40}\b(?:drug|therapy|treatment|vaccine|indication|candidate)\b",
+        r"\b(?:drug|therapy|treatment|vaccine|candidate)\b[^.]{0,40}\bapprov(?:es|ed|al)\b",
         r"\bfast\s+track\b", r"\borphan\s+drug\b", r"\bpdufa\b", r"\bnda\b", r"\bbla\b",
         r"\bcomplete\s+response\s+letter\b", r"\bcrl\b",
     )),
@@ -159,6 +167,11 @@ NOISE_PATTERNS = (
     r"\bhow\s+to\s+earn\s+\$[\d,]+\s+(?:a|per)\s+(?:month|year|week)\b",
     r"\bhow\s+much\s+you\s+would\s+have\s+made\b",
     r"\bearn\s+\$[\d,]+\s+(?:a|per)\s+month\s+from\b",
+    # "$100 Invested In Aon 15 Years Ago Would Be Worth This Much Today" --
+    # same listicle, different wording, straight off the live wire.
+    r"\$[\d,]+\s+invested\s+in\b",
+    r"\bwould\s+be\s+worth\s+this\s+much\b",
+    r"\bif\s+you\s+(?:had\s+)?bought\b.{0,30}\b(?:years?|decade)\s+ago\b",
 )
 
 _NOISE_RE = [re.compile(p, re.I) for p in NOISE_PATTERNS]
@@ -299,7 +312,13 @@ _CAT_WEIGHT = {"m&a": 3, "clinical": 3, "contract": 2, "capital": 2,
 _CRITICAL_PATTERNS = (
     r"\bfda\s+approv", r"\bapproved\s+by\s+the\s+fda\b",
     r"\bcomplete\s+response\s+letter\b", r"\bfda\s+reject",
-    r"\btrading\s+halted\b", r"\bhalted\s+(?:in|for|pending)\b",
+    r"\btrading\s+halted\b", r"\bhalted\s+(?:in|for|pending|on)\b",
+    # The live wire produced "ReTo Eco-Solutions Shared Halted On Circuit
+    # Breaker To The Upside; Stock Now Up 271.69%" -- a halt AND a 271% move,
+    # and it reached the feed unflagged because the pattern wanted the exact
+    # phrase "trading halted".
+    r"\bcircuit\s+breaker\b", r"\bshares?\s+halted\b", r"\bhalt(?:ed)?\s+to\s+the\s+(?:up|down)side\b",
+    r"\bresumes?\s+trading\b",
     r"\bbankrupt", r"\bchapter\s+11\b", r"\bdelisted\b", r"\bdefaults?\s+on\b",
     r"\bmerger\s+agreement\b", r"\bdefinitive\s+agreement\b",
     r"\bto\s+acquire\b.*\$", r"\bacquires?\b.*\bfor\s+\$",
