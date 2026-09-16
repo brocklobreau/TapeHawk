@@ -60,6 +60,33 @@
   .up { color:var(--good); } .down { color:var(--bad); } .dim { color:var(--faint); }
   .thin { color:var(--faint); font-style:italic; }
   .scroll { overflow-x:auto; }
+
+  /* A graded list runs to twenty-five or forty rows. Capped and scrolled so
+     the page stays navigable, with the column headers PINNED -- a table you
+     scroll while its labels sit off screen is a table you cannot read. */
+  .vwrap { position:relative; }
+  .vscroll { max-height:clamp(280px, 55vh, 620px); overflow:auto;
+             overscroll-behavior:contain;
+             scrollbar-width:thin; scrollbar-color:rgba(255,176,32,.45) transparent; }
+  .vscroll::-webkit-scrollbar { width:9px; height:9px; }
+  .vscroll::-webkit-scrollbar-track { background:transparent; }
+  .vscroll::-webkit-scrollbar-thumb { background:rgba(255,176,32,.38);
+    border-radius:99px; border:2px solid var(--surface); }
+  .vscroll::-webkit-scrollbar-thumb:hover { background:rgba(255,176,32,.62); }
+  .vscroll thead th { position:sticky; top:0; z-index:1; background:var(--surface); }
+  /* Chrome uses OVERLAY scrollbars: zero layout width, visible only while you
+     are actively scrolling. So the styled bar above cannot be the only signal
+     that there is more below -- the same trap that hid five tabs in
+     Bellwether's nav. A fade at the bottom edge says so, and clears at the end
+     of the list. */
+  .vwrap::after { content:''; position:absolute; left:0; right:0; bottom:0;
+    height:42px; pointer-events:none; opacity:0; transition:opacity .18s;
+    background:linear-gradient(to bottom, rgba(18,22,27,0), var(--surface));
+    border-radius:0 0 11px 11px; }
+  .vwrap.more::after { opacity:1; }
+  @media (prefers-reduced-motion:reduce){ .vwrap::after { transition:none; } }
+  .rowcount { color:var(--faint); font-weight:400; font-size:11.5px;
+              text-transform:none; letter-spacing:0; }
   .empty { padding:24px 16px; color:var(--muted); }
   .hl { max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
         display:block; }
@@ -208,11 +235,13 @@
           '<td class="num">'+signed(r.move_15m)+'</td>'+
           '<td class="num">'+signed(r.move_60m)+'</td></tr>';
       }).join('');
-      return '<section class="panel"><h2>'+esc(title)+'</h2>'+
+      return '<section class="panel"><h2>'+esc(title)+
+        ' <span class="rowcount">'+list.length+' graded</span></h2>'+
         (note?'<div class="pad" style="padding-bottom:0"><p class="caveat" style="margin:0">'+note+'</p></div>':'')+
-        '<div class="scroll"><table><thead><tr><th>When</th><th>Headline</th>'+
+        '<div class="vwrap"><div class="vscroll"><table><thead><tr><th>When</th><th>Headline</th>'+
         '<th>Ticker graded</th><th>Called</th><th class="num">+15 min</th>'+
-        '<th class="num">+60 min</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>';
+        '<th class="num">+60 min</th></tr></thead><tbody>'+rows+
+        '</tbody></table></div></div></section>';
     }
 
     if((d.recent||[]).length){
@@ -224,10 +253,12 @@
           '<td class="num">'+signed(r.move_15m)+'</td>'+
           '<td class="num">'+signed(r.move_60m)+'</td></tr>';
       }).join('');
-      parts.push('<section class="panel"><h2>Everything else, recently graded</h2><div class="scroll">'+
+      parts.push('<section class="panel"><h2>Everything else, recently graded '+
+        '<span class="rowcount">'+d.recent.length+' graded</span></h2>'+
+        '<div class="vwrap"><div class="vscroll">'+
         '<table><thead><tr><th>When</th><th>Headline</th><th>Ticker</th><th>Called</th>'+
         '<th class="num">+15 min</th><th class="num">+60 min</th></tr></thead><tbody>'+
-        rows+'</tbody></table></div></section>');
+        rows+'</tbody></table></div></div></section>');
     }
 
     parts.push('<p class="caveat">'+ (d.pending||0) +' headline(s) waiting to be graded; '+
@@ -235,7 +266,24 @@
       'carried no equity ticker). Both are excluded from every number above rather '+
       'than counted as no move.</p>');
     body.innerHTML=parts.join('');
+    markScrollables();
   }
+
+  function markScrollables(){
+    [].forEach.call(document.querySelectorAll('.vscroll'), function(el){
+      var wrap=el.parentNode;
+      if(!wrap || !wrap.classList.contains('vwrap')) return;
+      // 8px of slack: a sub-pixel rounding difference should not leave the
+      // fade showing on a list that is already at its end.
+      wrap.classList.toggle('more',
+        el.scrollHeight - el.clientHeight - el.scrollTop > 8);
+      if(!el.getAttribute('data-bound')){
+        el.setAttribute('data-bound', '1');
+        el.addEventListener('scroll', markScrollables, {passive:true});
+      }
+    });
+  }
+  window.addEventListener('resize', markScrollables);
 
   function load(){
     body.innerHTML='<div class="empty">Loading…</div>';
