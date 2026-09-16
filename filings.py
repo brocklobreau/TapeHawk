@@ -198,18 +198,26 @@ _ACC_IN_URL = re.compile(r"(\d{10}-\d{2}-\d{6})")
 def parse_atom(xml_text, want="SC 13D", subject_only=True):
     """Pull filings of one form type out of EDGAR's current-filings feed.
 
-    A 13D shows up twice -- once under the subject company and once under the
-    filer -- and only the subject entry names the issuer whose shares these
-    are, so the filer copy is dropped rather than shown as a second filing. An
-    entry whose role cannot be read is KEPT: losing a real 13D is worse than
-    showing one whose issuer we have to fill in later.
+    A 13D concerns two parties: the investor who filed it and the company whose
+    shares they bought. EDGAR may list the filing under either or both, and it
+    is the SUBJECT entry that names the company whose stock moves -- so when
+    both copies are present the subject wins and the filer copy is dropped as a
+    duplicate.
 
-    An 8-K has no such split: the company files it about itself. Passing
-    subject_only=False stops the filter throwing away every row.
+    What it must NOT do is discard a filing that appears only under the filer.
+    An earlier version did, and in production that filtered out every single
+    row: the feed reported entries, the parser returned none, and the tab
+    looked broken for a reason no log could explain. A filer-only row is kept,
+    marked, and its issuer filled in later from the filing's own document.
+
+    `subject_only` now only controls PREFERENCE, never exclusion. It stays a
+    parameter because an 8-K has no subject/filer split at all.
     """
-    out = []
+    by_accession, order = {}, []
     root = ET.fromstring(xml_text)
+    seen = 0
     for e in root.findall(f"{ATOM_NS}entry"):
+        seen += 1
         title = (e.findtext(f"{ATOM_NS}title") or "").strip()
         updated = (e.findtext(f"{ATOM_NS}updated") or "").strip()
         href = ""
@@ -224,17 +232,21 @@ def parse_atom(xml_text, want="SC 13D", subject_only=True):
         if not _is_form(form, want):
             continue
         low = title.lower()
-        if subject_only and "(filer)" in low and "(subject)" not in low:
-            continue
+        role = ("subject" if "(subject)" in low
+                else "filer" if "(filer)" in low else "unknown")
         cik = _CIK_IN_TITLE.search(title)
         acc = _ACC_IN_URL.search(href or "")
+        if not acc:
+            continue
         name = title.split(" - ", 1)[1] if " - " in title else title
         name = re.sub(r"\s*\((?:\d{7,10}|Subject|Filer)\)\s*", " ", name, flags=re.I).strip()
-        out.append({
-            "accession": acc.group(1) if acc else None,
+        row = {
+            "accession": acc.group(1),
             "form": form.upper(),
             "issuer_cik": int(cik.group(1)) if cik else None,
             "issuer_name": name or None,
+            "issuer_confirmed": role == "subject" or not subject_only,
+            "role": role,
             "filed_at": updated or None,
             "url": href or None,
             "source": "atom",
@@ -242,8 +254,17 @@ def parse_atom(xml_text, want="SC 13D", subject_only=True):
             # saves a request per filing; when they don't the header fetch
             # fills it in.
             "items": parse_items(title + " " + (e.findtext(f"{ATOM_NS}summary") or "")),
-        })
-    return [f for f in out if f["accession"]]
+        }
+        prev = by_accession.get(row["accession"])
+        if prev is None:
+            by_accession[row["accession"]] = row
+            order.append(row["accession"])
+        elif subject_only and prev["role"] != "subject" and role == "subject":
+            by_accession[row["accession"]] = row       # the better copy wins
+    rows = [by_accession[a] for a in order]
+    _status["last_atom_entries"] = seen
+    _status["last_atom_kept"] = len(rows)
+    return rows
 
 
 def _is_form(form, want):
@@ -482,6 +503,11 @@ def parse_daily_index(text, want="SC 13D"):
             "url": "https://www.sec.gov/Archives/" + path.lstrip("/"),
             "source": "daily-index",
             "items": [],            # the index carries no item codes
+            # The index names a party to the filing without saying which side
+            # it is on. Treated as usable because enrich() overrides it from
+            # the filing itself whenever the document can be read, and a name
+            # is more useful than a blank on the fallback path.
+            "issuer_confirmed": True,
         })
     return [f for f in out if f["accession"]]
 
@@ -504,6 +530,7 @@ _WANTED = (
     ("shares", ("aggregateamountbeneficiallyowned", "aggregateamount", "sharesbeneficially")),
     ("cusip", ("cusip",)),
     ("issuer_name", ("issuername", "nameofissuer", "subjectcompany")),
+    ("issuer_cik", ("issuercik", "subjectcik", "issuercentralindexkey")),
     ("reporting_person", ("reportingpersonname", "nameofreportingperson", "filedbyname")),
 )
 
@@ -572,7 +599,9 @@ def collect(want="SC 13D", subject_only=True, log=print):
                           want=want, subject_only=subject_only)
         if rows:
             return rows, "atom"
-        errors.append(f"atom returned no {want} entries")
+        errors.append(
+            f"atom: {_status.get('last_atom_entries', 0)} entries in the feed, "
+            f"0 matched {want}")
     except Exception as e:
         errors.append(f"atom: {e}")
 
@@ -584,9 +613,14 @@ def collect(want="SC 13D", subject_only=True, log=print):
             if rows:
                 return rows, f"daily-index {day.isoformat()}"
         except Exception as e:
-            errors.append(f"index {day}: {e}")
-    _status["last_error"] = " | ".join(errors[:3]) or None
-    log(f"filings: no source returned {want} rows -- " + (errors[0] if errors else "unknown"))
+            errors.append(f"index {day}: {type(e).__name__} {e}")
+        else:
+            errors.append(f"index {day}: fetched, 0 {want} rows")
+    _status["last_error"] = " | ".join(errors[:4]) or None
+    # Every attempt, not just the first. The first version logged errors[0]
+    # only, so a live failure showed one line about the Atom feed and said
+    # nothing at all about whether the fallback had even been reached.
+    log(f"filings: no source returned {want} rows. Tried: " + " | ".join(errors))
     return [], None
 
 
@@ -609,8 +643,19 @@ def poll_13d(store, log=print):
         detail = enrich(f.get("issuer_cik"), f["accession"], log=log)
         f = dict(f)
         f["kind"] = "13d"
+        # When the feed gave only the FILER's entry, the CIK in the title is
+        # the investor's, not the company's -- a ticker looked up with it would
+        # print the wrong symbol beside the stake, which is worse than none.
+        # The filing's own document names the issuer, so prefer that and fall
+        # back to nothing rather than to the investor.
+        issuer_cik = _number(detail.get("issuer_cik"))
+        if issuer_cik:
+            f["issuer_cik"] = int(issuer_cik)
+        elif not f.get("issuer_confirmed", True):
+            f["issuer_cik"] = None
         f["ticker"] = tickers.get(f.get("issuer_cik"))
-        f["issuer_name"] = detail.get("issuer_name") or f.get("issuer_name")
+        f["issuer_name"] = detail.get("issuer_name") or (
+            f.get("issuer_name") if f.get("issuer_confirmed", True) else None)
         f["percent"] = detail.get("percent")
         f["shares"] = detail.get("shares")
         f["cusip"] = detail.get("cusip")
