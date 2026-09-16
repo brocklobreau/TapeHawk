@@ -92,6 +92,27 @@ CREATE TABLE IF NOT EXISTS filings (
   source           TEXT
 );
 
+CREATE TABLE IF NOT EXISTS halts (
+  id            INTEGER PRIMARY KEY,
+  halt_key      TEXT UNIQUE,
+  symbol        TEXT NOT NULL,
+  name          TEXT,
+  market        TEXT,
+  code          TEXT,
+  halted_at     TEXT,
+  halt_date     TEXT,
+  quote_at      TEXT,
+  resumed_at    TEXT,
+  band_price    REAL,
+  seen_at       TEXT NOT NULL,
+  graded_at     TEXT,
+  pre_price     REAL,
+  reopen_price  REAL,
+  gap_pct       REAL,
+  move_15m      REAL,
+  move_60m      REAL
+);
+
 -- Accession numbers of 8-Ks already judged routine. Reading an 8-K's header
 -- costs a request, and without this ledger every poll would re-read the
 -- header of every routine 8-K still in the feed window, forever. Storing the
@@ -111,6 +132,9 @@ CREATE INDEX IF NOT EXISTS idx_filings_seen ON filings(seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_filings_ticker ON filings(ticker, seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_filings_kind ON filings(kind, seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_filings_coverage ON filings(coverage_at, seen_at);
+CREATE INDEX IF NOT EXISTS idx_halts_time ON halts(halted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_halts_symbol ON halts(symbol, halted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_halts_grade ON halts(graded_at, resumed_at);
 """
 
 
@@ -546,6 +570,128 @@ def filing_stats(days=30):
             "eightk_judged": judged, "eightk_uncovered": uncovered,
             "eightk_by_item": dict(sorted(by_item.items(), key=lambda kv: -kv[1])),
             "eightk_by_direction": by_dir}
+
+
+# --- halts ------------------------------------------------------------------
+
+def upsert_halt(h):
+    """'new', 'resumed', or None.
+
+    A halt appears in the feed the moment it starts, with the resumption
+    fields empty, and the SAME row is republished later once a resumption is
+    scheduled. So this cannot be insert-or-ignore: the second sighting is
+    where the resumption time arrives, and dropping it would leave every halt
+    permanently ungradeable.
+    """
+    c = _conn()
+    now = datetime.now(timezone.utc).isoformat()
+    row = c.execute("SELECT id, resumed_at FROM halts WHERE halt_key = ?",
+                    (h.get("halt_key"),)).fetchone()
+    if row is None:
+        c.execute(
+            """INSERT OR IGNORE INTO halts
+               (halt_key, symbol, name, market, code, halted_at, halt_date,
+                quote_at, resumed_at, band_price, seen_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (h.get("halt_key"), h.get("symbol"), h.get("name"), h.get("market"),
+             h.get("code"), h.get("halted_at"), h.get("halt_date"),
+             h.get("quote_at"), h.get("resumed_at"), h.get("band_price"), now))
+        c.commit()
+        return "new"
+    if h.get("resumed_at") and not row["resumed_at"]:
+        c.execute("UPDATE halts SET resumed_at = ?, quote_at = COALESCE(?, quote_at) "
+                  "WHERE id = ?", (h["resumed_at"], h.get("quote_at"), row["id"]))
+        c.commit()
+        return "resumed"
+    return None
+
+
+def recent_halts(limit=120, symbol=None, code=None, open_only=False):
+    sql = "SELECT * FROM halts WHERE 1=1"
+    args = []
+    if symbol:
+        sql += " AND symbol = ?"
+        args.append(symbol.upper())
+    if code:
+        sql += " AND code = ?"
+        args.append(code.upper())
+    if open_only:
+        sql += " AND resumed_at IS NULL"
+    sql += " ORDER BY COALESCE(halted_at, seen_at) DESC, id DESC LIMIT ?"
+    args.append(min(int(limit), 400))
+    return [dict(r) for r in _conn().execute(sql, args)]
+
+
+def halts_needing_grade(cutoff_iso, limit=20):
+    """Halts that have reopened long enough ago to measure, oldest first."""
+    rows = _conn().execute(
+        "SELECT halt_key, symbol, code, halted_at, resumed_at FROM halts "
+        "WHERE graded_at IS NULL AND resumed_at IS NOT NULL AND resumed_at < ? "
+        "ORDER BY resumed_at ASC LIMIT ?", (cutoff_iso, int(limit)))
+    return [dict(r) for r in rows]
+
+
+def mark_halt_graded(halt_key, result):
+    c = _conn()
+    c.execute("UPDATE halts SET graded_at = ?, pre_price = ?, reopen_price = ?, "
+              "gap_pct = ?, move_15m = ?, move_60m = ? WHERE halt_key = ?",
+              (datetime.now(timezone.utc).isoformat(), result.get("pre_price"),
+               result.get("reopen_price"), result.get("gap_pct"),
+               result.get("move_15m"), result.get("move_60m"), halt_key))
+    c.commit()
+
+
+def halt_stats(days=30):
+    """The base rate: what halts do at the reopen, across all of them.
+
+    Every figure carries its own n. A median gap computed over four halts is
+    not a base rate, and the whole reason this table exists is to be a control
+    -- a control that hides its sample size is worse than no control.
+    """
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    c = _conn()
+    total = c.execute("SELECT COUNT(*) n FROM halts WHERE seen_at > ?",
+                      (since,)).fetchone()["n"]
+    still_open = c.execute("SELECT COUNT(*) n FROM halts WHERE resumed_at IS NULL"
+                           ).fetchone()["n"]
+    graded = [dict(r) for r in c.execute(
+        "SELECT code, gap_pct, move_15m, move_60m FROM halts "
+        "WHERE graded_at IS NOT NULL AND gap_pct IS NOT NULL AND seen_at > ?",
+        (since,))]
+
+    def summarise(rows):
+        gaps = sorted(r["gap_pct"] for r in rows)
+        if not gaps:
+            return None
+        follow = [r["move_60m"] for r in rows if r["move_60m"] is not None]
+        return {
+            "n": len(gaps),
+            "median_gap": round(gaps[len(gaps) // 2], 2),
+            "mean_abs_gap": round(sum(abs(g) for g in gaps) / len(gaps), 2),
+            "gapped_up_pct": round(100.0 * sum(1 for g in gaps if g > 0) / len(gaps), 1),
+            "over_10pct": sum(1 for g in gaps if abs(g) > 10),
+            # Did the hour after the reopen extend the gap or give it back?
+            "continued_pct": (round(100.0 * sum(
+                1 for r in rows if r["move_60m"] is not None
+                and (r["move_60m"] > 0) == (r["gap_pct"] > 0)) / len(follow), 1)
+                if follow else None),
+            "follow_n": len(follow),
+        }
+
+    by_code = {}
+    for r in graded:
+        by_code.setdefault(r["code"] or "?", []).append(r)
+    by_code = {k: summarise(v) for k, v in
+               sorted(by_code.items(), key=lambda kv: -len(kv[1]))[:8]}
+    counts = {r["code"]: r["n"] for r in c.execute(
+        "SELECT code, COUNT(*) n FROM halts WHERE seen_at > ? GROUP BY code "
+        "ORDER BY n DESC", (since,))}
+    return {"days": days, "total": total, "open": still_open,
+            "overall": summarise(graded), "by_code": by_code,
+            "counts": counts,
+            "pending": c.execute(
+                "SELECT COUNT(*) n FROM halts WHERE graded_at IS NULL "
+                "AND resumed_at IS NOT NULL").fetchone()["n"]}
 
 
 def prune(keep_days=45):

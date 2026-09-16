@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapehawk — trading halts</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230B0D10'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%23FFB020'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg:#0B0D10; --surface:#12161B; --surface-2:#181D24; --line:#232A33;
+    --ink:#E8EAED; --muted:#8B94A0; --faint:#5A626C;
+    --accent:#FFB020; --good:#3FBF5F; --bad:#F04A4A; --live:#2BD67B;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+         font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  a { color:inherit; }
+  header { position:sticky; top:0; z-index:20; background:rgba(11,13,16,.94);
+           backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+           padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
+  .brand span { color:var(--accent); }
+  .tabs { display:flex; gap:4px; flex-wrap:wrap; }
+  .tab { font-size:13px; padding:6px 13px; border-radius:7px; text-decoration:none;
+         color:var(--muted); border:1px solid transparent; }
+  .tab:hover { color:var(--ink); }
+  .tab.on { background:var(--surface-2); border-color:var(--line); color:var(--accent);
+            font-weight:600; }
+  .spacer { flex:1; }
+
+  .wrap { max-width:1150px; margin:0 auto; padding:18px 16px 40px; }
+  .lede { color:var(--muted); font-size:13.5px; max-width:76ch; margin:0 0 6px; }
+  .lede b { color:var(--ink); }
+  .caveat { color:var(--faint); font-size:12.5px; max-width:76ch; margin:0 0 18px;
+            border-left:2px solid var(--line); padding-left:11px; }
+
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:11px;
+           margin-bottom:16px; }
+  .panel > h2 { margin:0; padding:11px 14px; font-size:12px; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--muted); border-bottom:1px solid var(--line); }
+  .pad { padding:14px; }
+
+  .hero { display:grid; grid-template-columns:repeat(auto-fit,minmax(152px,1fr)); gap:12px; }
+  .stat { background:var(--surface-2); border:1px solid var(--line); border-radius:9px;
+          padding:12px 13px; }
+  .stat .k { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); }
+  .stat .v { font-family:var(--mono); font-size:25px; font-weight:700; margin-top:3px; }
+  .stat .v.text { font-size:15px; font-weight:650; }
+  .stat .n { font-size:11.5px; color:var(--faint); margin-top:2px; }
+
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+       color:var(--faint); font-weight:600; padding:8px 14px;
+       border-bottom:1px solid var(--line); white-space:nowrap;
+       position:sticky; top:0; z-index:1; background:var(--surface); }
+  td { padding:9px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr:last-child td { border-bottom:0; }
+  td.num { font-family:var(--mono); text-align:right; white-space:nowrap;
+           font-variant-numeric:tabular-nums; }
+  .dim { color:var(--faint); } .up { color:var(--good); } .down { color:var(--bad); }
+  .empty { padding:24px 16px; color:var(--muted); line-height:1.65; }
+  .tick { font-family:var(--mono); font-size:12.5px; font-weight:700; padding:2px 7px;
+          border-radius:4px; background:var(--surface-2); border:1px solid var(--line); }
+
+  /* The code IS the story, so it gets the strongest treatment on the row and
+     its colour encodes how long you are stuck rather than which way the price
+     went -- direction is measured separately and lives in its own columns. */
+  .code { font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:.03em;
+          padding:3px 7px; border-radius:4px; white-space:nowrap; display:inline-block;
+          background:var(--surface-2); border:1px solid var(--line); color:var(--muted); }
+  .code.pause  { background:rgba(255,176,32,.14); color:var(--accent);
+                 border-color:rgba(255,176,32,.32); }
+  .code.news   { background:rgba(90,150,255,.14); color:#7FB0FF;
+                 border-color:rgba(90,150,255,.3); }
+  .code.grave  { background:rgba(240,74,74,.16); color:var(--bad);
+                 border-color:rgba(240,74,74,.34); }
+  .code.market { background:rgba(200,120,255,.13); color:#C79BFF;
+                 border-color:rgba(200,120,255,.3); }
+  .code.ipo    { background:rgba(63,191,95,.13); color:var(--good);
+                 border-color:rgba(63,191,95,.3); }
+  .code.unknown { border-style:dashed; }
+  /* Capped so the note wraps instead of stretching the table, and NEVER
+     hidden on a phone: the note is the most important cell in the row --
+     "Can run for DAYS" on a T12 is the whole reason to look at this page, and
+     the phone is where someone checks it mid-halt. The table scrolls
+     horizontally inside its own container instead. */
+  .meaning { font-size:12.5px; max-width:30ch; }
+  .meaning b { font-weight:600; }
+  .meaning span { color:var(--faint); display:block; font-size:11.5px; }
+
+  .halted-now { font-size:10.5px; font-weight:700; padding:2px 6px; border-radius:4px;
+                background:rgba(240,74,74,.16); color:var(--bad); text-transform:uppercase;
+                white-space:nowrap; }
+  .halted-now.live::before { content:'● '; }
+
+  .filters { display:flex; gap:6px; padding:10px 14px; border-bottom:1px solid var(--line);
+             flex-wrap:wrap; }
+  .chip { font-size:12px; padding:5px 11px; border-radius:99px; cursor:pointer;
+          background:var(--surface-2); border:1px solid var(--line); color:var(--muted); }
+  .chip.on { background:var(--accent); color:#1a1205; border-color:var(--accent); font-weight:650; }
+
+  .vwrap { position:relative; }
+  .vscroll { max-height:clamp(300px, 58vh, 680px); overflow:auto; overscroll-behavior:contain;
+             scrollbar-width:thin; scrollbar-color:rgba(255,176,32,.45) transparent; }
+  .vscroll::-webkit-scrollbar { width:9px; height:9px; }
+  .vscroll::-webkit-scrollbar-track { background:transparent; }
+  .vscroll::-webkit-scrollbar-thumb { background:rgba(255,176,32,.38); border-radius:99px;
+    border:2px solid var(--surface); }
+  /* Chrome's overlay scrollbars have zero layout width and show only while you
+     scroll, so the bar alone cannot say there is more below. */
+  .vwrap::after { content:''; position:absolute; left:0; right:0; bottom:0; height:42px;
+    pointer-events:none; opacity:0; transition:opacity .18s;
+    background:linear-gradient(to bottom, rgba(18,22,27,0), var(--surface));
+    border-radius:0 0 11px 11px; }
+  .vwrap.more::after { opacity:1; }
+  @media (prefers-reduced-motion:reduce){ .vwrap::after { transition:none; } }
+  .rowcount { color:var(--faint); font-weight:400; font-size:11.5px; text-transform:none;
+              letter-spacing:0; }
+  .glossary td { font-size:12.5px; }
+  @media (max-width:640px){ .meaning { max-width:24ch; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">TAPEHAWK<span>.</span></div>
+  <nav class="tabs">
+    <a class="tab" href="/">Live</a>
+    <a class="tab on" href="/halts">Halts</a>
+    <a class="tab" href="/filings">SEC Filings</a>
+    <a class="tab" href="/scoreboard">Scoreboard</a>
+  </nav>
+  <div class="spacer"></div>
+</header>
+
+<div class="wrap">
+  <p class="lede">Every trading halt on US exchanges, straight from <b>Nasdaq's own halt
+  feed</b> — the authoritative record, not a headline about it. The <b>reason code</b> is the
+  part that matters: <b>LUDP</b> is a five-minute volatility pause, <b>T12</b> is an exchange
+  asking the company questions and can run for days.</p>
+  <p class="caveat">Once a halt has reopened and an hour has passed, it gets measured: the
+  gap from the last price before the halt to the reopening print, then what the next 15 and 60
+  minutes did. Every halt is measured, not a selected few — that is the point. These are
+  market-wide base rates to compare your own trades against, and they are descriptions of what
+  happened, not predictions of what happens next.</p>
+
+  <section class="panel">
+    <h2>The feed</h2>
+    <div class="hero pad" id="hero"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Halts <span class="rowcount" id="count"></span></h2>
+    <div class="filters" id="filters"></div>
+    <div class="vwrap"><div class="vscroll" id="tablewrap">
+      <div class="empty">Loading…</div>
+    </div></div>
+  </section>
+
+  <section class="panel" id="basepanel" style="display:none">
+    <h2>Base rate by code <span class="rowcount">what the reopening print actually did</span></h2>
+    <div class="vwrap"><div class="vscroll" id="baserate"></div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Code glossary</h2>
+    <div class="vwrap"><div class="vscroll" id="glossary"></div></div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var hero=document.getElementById('hero'), tablewrap=document.getElementById('tablewrap'),
+      filters=document.getElementById('filters'), glossary=document.getElementById('glossary'),
+      baserate=document.getElementById('baserate'), basepanel=document.getElementById('basepanel'),
+      count=document.getElementById('count');
+  var mode='', CODES={}, lastData=null;
+
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function nnum(v){ return (v==null||isNaN(v))?'—':(+v).toLocaleString(); }
+  function pct(v){ if(v==null||isNaN(v))return '<span class="dim">—</span>';
+    var n=+v; return '<span class="'+(n>0?'up':(n<0?'down':''))+'">'+
+      (n>0?'+':'')+n.toFixed(2)+'%</span>'; }
+  function money(v){ return (v==null||isNaN(v))?'—':'$'+(+v).toFixed(2); }
+
+  // Times arrive as ISO with an offset. Rendered in the reader's own zone,
+  // which for a US trader is market time -- never hand-formatted, because a
+  // hand-rolled offset is how this project got a four-hour error once.
+  function clock(iso){
+    if(!iso) return '—';
+    var t=Date.parse(iso);
+    if(!t) return '—';
+    return new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+  function day(iso){
+    var t=Date.parse(iso||'');
+    if(!t) return '';
+    return new Date(t).toLocaleDateString([], {month:'short', day:'numeric'});
+  }
+
+  function sev(code){ var c=CODES[(code||'').toUpperCase()]; return c?c.severity:'unknown'; }
+  function label(code){ var c=CODES[(code||'').toUpperCase()]; return c?c.label:'Unrecognised code'; }
+  function note(code){ var c=CODES[(code||'').toUpperCase()];
+    return c?c.note:'Not in this glossary — check the listing exchange before trading it'; }
+
+  function render(d){
+    var st=d.stats||{}, w=d.watcher||{}, rows=d.halts||[];
+    CODES=d.codes||CODES;
+    var o=st.overall;
+
+    hero.innerHTML =
+      stat('Halted right now', nnum(st.open),
+           st.open ? 'not yet reopened' : 'nothing halted')+
+      stat('Halts seen', nnum(st.total), 'last '+(st.days||30)+' days')+
+      stat('Median gap', o ? (o.median_gap>0?'+':'')+o.median_gap.toFixed(2)+'%' : '—',
+           o ? 'across '+o.n+' measured reopens' : 'nothing measured yet')+
+      stat('Gapped up', o ? o.gapped_up_pct.toFixed(0)+'%' : '—',
+           o ? '50% = a coin flip' : 'needs graded halts')+
+      stat('Feed', w.last_poll ? 'live' : 'starting…',
+           w.last_error ? esc(String(w.last_error).slice(0,60))
+             : (w.last_poll ? 'checked '+clock(w.last_poll) : 'no poll yet'), 'text');
+
+    // Filters built from codes actually seen, so no chip is a dead end.
+    var counts=st.counts||{};
+    filters.innerHTML='<button class="chip'+(mode?'':' on')+'" data-code="">All halts</button>'+
+      '<button class="chip'+(mode==='__open'?' on':'')+'" data-code="__open">Still halted</button>'+
+      Object.keys(counts).map(function(c){
+        return '<button class="chip'+(mode===c?' on':'')+'" data-code="'+esc(c)+'">'+
+               esc(c)+' ('+counts[c]+')</button>';
+      }).join('');
+
+    var shown=rows;
+    if(mode==='__open') shown=rows.filter(function(h){ return !h.resumed_at; });
+    else if(mode) shown=rows.filter(function(h){ return (h.code||'')===mode; });
+    count.textContent=shown.length+' shown';
+
+    if(!shown.length){
+      tablewrap.innerHTML='<div class="empty">'+(rows.length
+        ? '<b>Nothing under that filter.</b><br>Clear it to see the rest.'
+        : '<b>No halts recorded yet.</b><br>This fills from Nasdaq’s feed within a minute '+
+          'of the next halt. Outside market hours an empty table is normal.')+'</div>';
+      return;
+    }
+
+    tablewrap.innerHTML='<table><thead><tr>'+
+      '<th>Halted</th><th>Symbol</th><th>Code</th><th>What it means</th>'+
+      '<th>Resumed</th><th class="num">Band</th><th class="num">Gap</th>'+
+      '<th class="num">+15m</th><th class="num">+60m</th>'+
+      '</tr></thead><tbody>'+
+      shown.map(function(h){
+        var open=!h.resumed_at;
+        return '<tr>'+
+          '<td class="num">'+esc(clock(h.halted_at))+
+            '<div class="dim" style="font-size:11px">'+esc(day(h.halted_at))+'</div></td>'+
+          '<td><span class="tick">'+esc(h.symbol)+'</span>'+
+            (h.name?'<div class="dim" style="font-size:11px;max-width:16ch;overflow:hidden;'+
+              'text-overflow:ellipsis;white-space:nowrap">'+esc(h.name)+'</div>':'')+'</td>'+
+          '<td><span class="code '+sev(h.code)+'">'+esc(h.code||'?')+'</span></td>'+
+          '<td class="meaning"><b>'+esc(label(h.code))+'</b>'+
+            '<span>'+esc(note(h.code))+'</span></td>'+
+          '<td>'+(open?'<span class="halted-now live">Halted</span>'
+                      :'<span class="num">'+esc(clock(h.resumed_at))+'</span>')+'</td>'+
+          '<td class="num">'+money(h.band_price)+'</td>'+
+          '<td class="num">'+pct(h.gap_pct)+'</td>'+
+          '<td class="num">'+pct(h.move_15m)+'</td>'+
+          '<td class="num">'+pct(h.move_60m)+'</td>'+
+        '</tr>';
+      }).join('')+'</tbody></table>';
+
+    // Base rate by code
+    var by=st.by_code||{};
+    var keys=Object.keys(by).filter(function(k){ return by[k]; });
+    if(keys.length){
+      basepanel.style.display='';
+      baserate.innerHTML='<table><thead><tr><th>Code</th><th>Meaning</th>'+
+        '<th class="num">N</th><th class="num">Median gap</th><th class="num">Mean |gap|</th>'+
+        '<th class="num">Gapped up</th><th class="num">Over 10%</th>'+
+        '<th class="num">Kept going</th></tr></thead><tbody>'+
+        keys.map(function(k){
+          var s=by[k];
+          // A rate over a handful of halts is not a rate. Say so inline rather
+          // than letting a clean-looking percentage pass for a base rate.
+          var thin = s.n<10 ? ' <span class="dim">(too few)</span>' : '';
+          return '<tr><td><span class="code '+sev(k)+'">'+esc(k)+'</span></td>'+
+            '<td class="meaning"><b>'+esc(label(k))+'</b></td>'+
+            '<td class="num">'+s.n+thin+'</td>'+
+            '<td class="num">'+pct(s.median_gap)+'</td>'+
+            '<td class="num">'+s.mean_abs_gap.toFixed(2)+'%</td>'+
+            '<td class="num">'+s.gapped_up_pct.toFixed(0)+'%</td>'+
+            '<td class="num">'+s.over_10pct+'</td>'+
+            '<td class="num">'+(s.continued_pct==null?'<span class="dim">—</span>'
+              :s.continued_pct.toFixed(0)+'% <span class="dim">n='+s.follow_n+'</span>')+'</td>'+
+          '</tr>';
+        }).join('')+'</tbody></table>'+
+        '<div class="empty" style="padding:12px 14px;font-size:12px">'+
+        '“Kept going” is how often the hour after the reopen moved the same way as the gap. '+
+        (st.pending?st.pending+' halt(s) still waiting to be measured.':'')+'</div>';
+    } else { basepanel.style.display='none'; }
+  }
+
+  function renderGlossary(){
+    var keys=Object.keys(CODES);
+    if(!keys.length){ glossary.innerHTML='<div class="empty">Loading…</div>'; return; }
+    glossary.innerHTML='<table class="glossary"><thead><tr><th>Code</th><th>Name</th>'+
+      '<th>What it implies</th></tr></thead><tbody>'+
+      keys.map(function(k){
+        return '<tr><td><span class="code '+CODES[k].severity+'">'+esc(k)+'</span></td>'+
+          '<td><b>'+esc(CODES[k].label)+'</b></td>'+
+          '<td class="dim">'+esc(CODES[k].note)+'</td></tr>';
+      }).join('')+'</tbody></table>';
+  }
+
+  function stat(k,v,n,cls){
+    return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v '+(cls||'')+'">'+v+
+           '</div><div class="n">'+n+'</div></div>';
+  }
+
+  function markScrollables(){
+    [].forEach.call(document.querySelectorAll('.vscroll'), function(el){
+      var wrap=el.parentNode;
+      if(!wrap || !wrap.classList.contains('vwrap')) return;
+      wrap.classList.toggle('more', el.scrollHeight - el.clientHeight - el.scrollTop > 8);
+      if(!el.getAttribute('data-bound')){
+        el.setAttribute('data-bound','1');
+        el.addEventListener('scroll', markScrollables, {passive:true});
+      }
+    });
+  }
+  window.addEventListener('resize', markScrollables);
+
+  function load(){
+    fetch('/api/halts')
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.error){ tablewrap.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
+        lastData=d; render(d); renderGlossary(); markScrollables();
+      })
+      .catch(function(){ tablewrap.innerHTML='<div class="empty">Could not load the halt feed.</div>'; });
+  }
+
+  // Filtering is a narrowing of rows already held, so it costs no round trip.
+  document.addEventListener('click', function(e){
+    var c=e.target.closest('.chip');
+    if(!c || !c.hasAttribute('data-code')) return;
+    mode=c.getAttribute('data-code');
+    if(lastData){ render(lastData); markScrollables(); }
+  });
+
+  load();
+  // Halts arrive in bursts and the feed is small, so a short refresh is cheap
+  // and this is the page someone leaves open during the session.
+  setInterval(load, 30000);
+})();
+</script>
+</body>
+</html>

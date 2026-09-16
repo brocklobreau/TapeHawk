@@ -24,7 +24,9 @@ from flask import Flask, Response, redirect, request, send_from_directory
 
 import earnings
 import filings
+import halts
 import news_stream
+import notify
 import outcomes
 import research
 import store
@@ -195,6 +197,28 @@ def api_earnings():
         return {"error": "Earnings history unavailable right now."}, 502
 
 
+@app.route("/halts")
+def halts_page():
+    return send_from_directory(HERE, "halts.html")
+
+
+@app.route("/api/halts")
+def api_halts():
+    try:
+        return {"halts": store.recent_halts(
+                    limit=int(request.args.get("limit", 120)),
+                    symbol=(request.args.get("symbol") or "").strip() or None,
+                    code=(request.args.get("code") or "").strip() or None,
+                    open_only=request.args.get("open") == "1"),
+                "codes": {k: {"label": v[0], "note": v[1], "severity": v[2]}
+                          for k, v in halts.CODES.items()},
+                "stats": store.halt_stats(),
+                "watcher": halts.status()}
+    except Exception as e:
+        log(f"halts page failed: {e}")
+        return {"error": "Could not read the halt feed."}, 500
+
+
 @app.route("/filings")
 def filings_page():
     return send_from_directory(HERE, "filings.html")
@@ -252,12 +276,33 @@ def api_scoreboard():
 @app.route("/api/status")
 def api_status():
     return {"stream": news_stream.status(), "store": store.stats(),
+            "filings": filings.status(), "halts": halts.status(),
+            "alerts": notify.status(),
             "now": datetime.now(timezone.utc).isoformat()}
 
 
 @app.route("/healthz")
 def healthz():
     return {"ok": True}
+
+
+def _alert_loop():
+    """Phone alerts for Big News.
+
+    Subscribes to the SAME queue the browser stream uses, which is the whole
+    reason news_stream needs no changes: that queue only ever receives
+    headlines that were fresh AND not filler, so a corrected re-send or a
+    reconnect replay cannot buzz anyone.
+    """
+    q = news_stream.subscribe()
+    while True:
+        try:
+            item = q.get()
+            if (item.get("importance") or 0) >= 5:
+                notify.headline_alert(item, log=log)
+        except Exception as e:
+            log(f"alert loop error (non-fatal): {e}")
+            time.sleep(5)
 
 
 _started = False
@@ -276,9 +321,18 @@ def _grader_loop():
         try:
             outcomes.grade_pending(store, log=log)
         except Exception as e:
+            log(f"outcome grading failed (non-fatal): {e}")
+        try:
+            # Halts are graded on the same pass and the same bars, so the
+            # numbers on both pages are measured the same way and can honestly
+            # be compared with each other.
+            halts.grade_pending(store, outcomes, log=log)
+        except Exception as e:
             # Grading is a reporting feature. It must never be able to take
             # down ingest, which is the part that cannot be recovered later.
-            log(f"outcome grading failed (non-fatal): {e}")
+            # Named separately from the headline grader above so a log line
+            # says which of the two actually failed.
+            log(f"halt grading failed (non-fatal): {e}")
         time.sleep(GRADE_INTERVAL_SECONDS)
 
 
@@ -311,12 +365,20 @@ def start_once():
             log(f"importance backfill skipped: {e}")
         news_stream.start(log=log)
         _start_grader()
+        notify.arm(log=log)
+        if notify.configured():
+            threading.Thread(target=_alert_loop, daemon=True,
+                             name="alerts").start()
         # Started last and in its own thread: a slow or unreachable sec.gov
         # must not delay the headline socket coming up.
         try:
             filings.start(store, log=log)
         except Exception as e:
             log(f"filings watcher failed to start (non-fatal): {e}")
+        try:
+            halts.start(store, log=log)
+        except Exception as e:
+            log(f"halt watcher failed to start (non-fatal): {e}")
         log("tapehawk: started")
 
 
