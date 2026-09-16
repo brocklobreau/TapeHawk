@@ -124,6 +124,14 @@ MAX_BODY_BYTES = 220_000
 _rate_lock = threading.Lock()
 _last_request = [0.0]
 _ticker_cache = {"at": 0.0, "map": {}}
+# The first poll after a restart sees the whole recent feed as "new". Tracked
+# so the log can say which pass was the priming one, and so that anything
+# reacting to new filings later (a notifier, a webhook) has the hook it needs
+# to stay quiet on the burst a restart produces.
+_primed = [False]
+# A filing that has been sitting in the feed for a day is not news, whatever
+# the database thinks. Used by _fresh_enough below.
+ALERT_MAX_AGE_HOURS = 8
 _status = {"last_poll": None, "last_source": None, "last_count": 0,
            "last_error": None, "stored": 0, "polls": 0,
            "last_8k_poll": None, "last_8k_source": None, "last_8k_count": 0,
@@ -141,6 +149,18 @@ def _throttle():
         if wait > 0:
             time.sleep(wait)
         _last_request[0] = time.time()
+
+
+class SecError(RuntimeError):
+    """A refusal or failure from sec.gov, carrying the reason it gave.
+
+    Defined here because it is raised here. An earlier edit renamed a class
+    that lives in a DIFFERENT module, so this name was referenced and never
+    created -- every non-200 from sec.gov raised NameError instead of the
+    intended error, and the fallback chain reported 'NameError' where it
+    should have reported what the SEC actually said. The tests never caught it
+    because none of them exercise an HTTP failure path; the one below now does.
+    """
 
 
 def _describe(resp):
@@ -320,7 +340,90 @@ def parse_items(text):
     return found
 
 
-# --- source 2: the end-of-day index -----------------------------------------
+# --- source 2: EDGAR full-text search ---------------------------------------
+# Added after the Atom feed returned an empty document on every poll in
+# production for an hour straight. This endpoint was confirmed by hand to
+# return real SC 13D rows, and it carries something the other sources do not:
+# the TICKER, inline, in display_names -- so no CIK lookup is needed, and the
+# second name in the list is the reporting person.
+#
+# Its date parameters could not be made to work (every documented spelling
+# returned zero hits), so nothing is passed and the rows are filtered and
+# sorted here instead. Slightly wasteful, entirely reliable.
+
+EFTS_URL = "https://efts.sec.gov/LATEST/search-index?q=&forms={form}"
+_NAME_TICKER = re.compile(r"^(.*?)\s*\(([A-Z][A-Z0-9.\-]{0,6})\)\s*\(CIK\s*(\d+)\)\s*$")
+_NAME_ONLY = re.compile(r"^(.*?)\s*\(CIK\s*(\d+)\)\s*$")
+
+
+def parse_efts(payload, want="SC 13D"):
+    """Rows out of the full-text search response.
+
+    display_names holds every party to the filing. The entry carrying a ticker
+    is the issuer -- the company whose stock moves -- and any other is a
+    reporting person. That split is exactly the subject/filer distinction the
+    Atom feed makes with a "(Subject)" suffix, available here for free.
+    """
+    hits = (((payload or {}).get("hits") or {}).get("hits")) or []
+    out = []
+    for h in hits:
+        src = h.get("_source") or {}
+        acc = src.get("adsh")
+        form = (src.get("form") or "").strip()
+        if not acc or not _is_form(form, want):
+            continue
+        issuer_name = issuer_cik = ticker = reporting = None
+        for name in src.get("display_names") or []:
+            m = _NAME_TICKER.match(str(name).strip())
+            if m and not ticker:
+                issuer_name, ticker, issuer_cik = m.group(1), m.group(2), int(m.group(3))
+                continue
+            m2 = _NAME_ONLY.match(str(name).strip())
+            if m2 and not reporting:
+                reporting = m2.group(1)
+        # With no ticker anywhere, the first name is the best guess at the
+        # issuer -- but it is NOT confirmed, so downstream will not print a
+        # symbol next to it.
+        if not issuer_name and (src.get("display_names") or []):
+            first = str(src["display_names"][0]).strip()
+            m2 = _NAME_ONLY.match(first)
+            issuer_name = m2.group(1) if m2 else first
+            reporting = None if reporting == issuer_name else reporting
+        out.append({
+            "accession": acc,
+            "form": form.upper(),
+            "issuer_cik": issuer_cik,
+            "issuer_name": issuer_name,
+            "issuer_confirmed": bool(ticker),
+            "ticker": ticker,
+            "reporting_person": reporting,
+            "role": "subject" if ticker else "unknown",
+            "filed_at": src.get("file_date") or None,
+            "url": _filing_url(src.get("ciks"), acc),
+            "source": "full-text-search",
+            "items": parse_items(" ".join(src.get("items") or [])),
+        })
+    # Newest first, because the endpoint's own ordering is not by date and a
+    # poller that reads the oldest hundred filings forever never sees today.
+    out.sort(key=lambda r: str(r.get("filed_at") or ""), reverse=True)
+    return out
+
+
+def _filing_url(ciks, accession):
+    cik = None
+    for c in (ciks or []):
+        try:
+            cik = int(c)
+            break
+        except (TypeError, ValueError):
+            continue
+    if not cik or not accession:
+        return None
+    return (ARCHIVE.format(cik=cik, acc=accession.replace("-", ""))
+            + f"/{accession}-index.htm")
+
+
+# --- source 3: the end-of-day index -----------------------------------------
 
 def fetch_items(cik, accession, log=print):
     """Item codes from the filing's own SGML header.
@@ -501,7 +604,26 @@ def judge_body_item(item, body):
     return None
 
 
+_last_body = [""]
+
+
+def _shape(text):
+    """A one-line description of what a response actually was.
+
+    'fetched, 0 rows' is ambiguous: it covers a real empty index and an HTML
+    error page returned with status 200, which are completely different
+    problems. Naming the shape separates them in the log.
+    """
+    t = (text or "").lstrip()
+    if not t:
+        return "an empty body"
+    if t[:400].lower().find("<html") >= 0 or t.startswith("<!"):
+        return f"an HTML page ({len(text)} bytes) -- not an index file"
+    return f"{len(text)} bytes, {text.count(chr(10)) + 1} lines"
+
+
 def parse_daily_index(text, want="SC 13D"):
+    _last_body[0] = text or ""
     """The published daily index is fixed-width text with a header block. Its
     columns are Form Type | Company Name | CIK | Date Filed | File Name.
 
@@ -631,6 +753,15 @@ def collect(want="SC 13D", subject_only=True, log=print):
     except Exception as e:
         errors.append(f"atom: {e}")
 
+    try:
+        rows = parse_efts(_get(EFTS_URL.format(form=want.replace(" ", "+")),
+                               as_json=True), want=want)
+        if rows:
+            return rows, "full-text-search"
+        errors.append("full-text-search: 0 rows")
+    except Exception as e:
+        errors.append(f"full-text-search: {e}")
+
     today = datetime.now(timezone.utc).date()
     # Weekdays only, and at most three of them. EDGAR publishes no daily index
     # for a Saturday or Sunday, so requesting one is a guaranteed miss that
@@ -650,7 +781,11 @@ def collect(want="SC 13D", subject_only=True, log=print):
         except Exception as e:
             errors.append(f"index {day}: {type(e).__name__} {e}")
         else:
-            errors.append(f"index {day}: fetched, 0 {want} rows")
+            # Say what came back. sec.gov answers a missing index file with a
+            # 200 and an HTML page, which is indistinguishable from a real but
+            # empty index unless the content is described.
+            errors.append(f"index {day}: fetched {_shape(_last_body[0])}, "
+                          f"0 {want} rows")
     _status["last_error"] = " | ".join(errors[:4]) or None
     # Every attempt, not just the first. The first version logged errors[0]
     # only, so a live failure showed one line about the Atom feed and said
@@ -704,8 +839,32 @@ def poll_13d(store, log=print):
                 f" by {f.get('reporting_person') or 'undisclosed'}")
     _status["stored"] += stored
     if stored:
-        log(f"filings: stored {stored} new 13D filing(s) from {source}")
+        log(f"filings: stored {stored} new 13D filing(s) from {source}"
+            + ("" if _primed[0] else " -- first pass"))
+    _primed[0] = True
     return stored
+
+
+def _fresh_enough(filed_at):
+    """Is this filing new enough to be treated as breaking?
+
+    A date-only stamp counts as fresh only if it is today: EDGAR dates a
+    filing without a time of day often enough that treating every such row as
+    stale would silence the daily-index path entirely.
+    """
+    s = str(filed_at or "").strip()
+    if not s:
+        return False
+    now = datetime.now(timezone.utc)
+    if len(s) <= 10:
+        return s[:10] == now.date().isoformat()
+    try:
+        t = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if t.tzinfo is None:
+        return False
+    return 0 <= (now - t).total_seconds() <= ALERT_MAX_AGE_HOURS * 3600
 
 
 def assess(items, body_fn):

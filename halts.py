@@ -31,14 +31,11 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-import notify
-
 FEED_URL = "https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts"
 NS = {"ndaq": "http://www.nasdaqtrader.com/"}
 MARKET_TZ = ZoneInfo("America/New_York")
 TIMEOUT = 15
 POLL_SECONDS = 45
-ALERT_MAX_AGE_MINUTES = 20
 
 # What each code actually means, and how much it should worry you. The
 # severity is not a prediction of price -- it is how long you are stuck and
@@ -73,8 +70,10 @@ CODES = {
     "R1":   ("Not registered", "Security is not registered or is suspended", "grave"),
     "R4":   ("Qualification issue", "Security does not meet exchange qualifications", "grave"),
 }
-# The codes worth waking someone up for. A volatility pause is routine; these
-# are the ones that change what a position is worth.
+# The codes that change what a position is worth, as opposed to the routine
+# five-minute pauses. Nothing acts on this today -- phone alerts are switched
+# off -- but it is the list a notifier would use, and it is the honest
+# separation between "paused" and "in trouble".
 ALERT_CODES = {"T12", "H4", "H9", "H10", "H11", "D", "T6"}
 
 _status = {"last_poll": None, "last_count": 0, "stored": 0, "polls": 0,
@@ -194,39 +193,18 @@ def poll_once(store, log=print):
             d = describe(h.get("code"))
             log(f"halts: {h['symbol']} {d['code']} — {d['label']}"
                 + (f" (band ${h['band_price']:.2f})" if h.get("band_price") else ""))
-            # Only the codes that mean something has gone wrong, and only while
-            # the halt is still current. The first poll after a restart sees a
-            # whole day of halts as new and must stay silent.
-            if (_primed[0] and os.environ.get("NTFY_HALTS") == "1"
-                    and d["code"] in ALERT_CODES and _recent(h.get("halted_at"))):
-                notify.send(f"HALT {h['symbol']}: {d['code']}",
-                            f"{h.get('name') or h['symbol']} — {d['label']}. {d['note']}.",
-                            key=f"halt:{h['halt_key']}", tags=["octagonal_sign"],
-                            priority=4, log=log)
         elif result == "resumed":
             updated += 1
     _status["stored"] += stored
     if stored or updated:
         log(f"halts: {stored} new, {updated} resumption(s) filled in"
-            + ("" if _primed[0] else " -- first pass, alerts suppressed"))
+            + ("" if _primed[0] else " -- first pass"))
     _primed[0] = True
     return stored
 
 
-def _recent(iso, minutes=ALERT_MAX_AGE_MINUTES):
-    if not iso:
-        return False
-    try:
-        t = datetime.fromisoformat(str(iso))
-    except ValueError:
-        return False
-    if t.tzinfo is None:
-        return False
-    return 0 <= (datetime.now(timezone.utc) - t).total_seconds() <= minutes * 60
-
-
 def status():
-    return dict(_status, alerts_on=os.environ.get("NTFY_HALTS") == "1")
+    return dict(_status)
 
 
 def start(store, log=print):

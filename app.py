@@ -26,7 +26,6 @@ import earnings
 import filings
 import halts
 import news_stream
-import notify
 import outcomes
 import research
 import store
@@ -277,32 +276,12 @@ def api_scoreboard():
 def api_status():
     return {"stream": news_stream.status(), "store": store.stats(),
             "filings": filings.status(), "halts": halts.status(),
-            "alerts": notify.status(),
             "now": datetime.now(timezone.utc).isoformat()}
 
 
 @app.route("/healthz")
 def healthz():
     return {"ok": True}
-
-
-def _alert_loop():
-    """Phone alerts for Big News.
-
-    Subscribes to the SAME queue the browser stream uses, which is the whole
-    reason news_stream needs no changes: that queue only ever receives
-    headlines that were fresh AND not filler, so a corrected re-send or a
-    reconnect replay cannot buzz anyone.
-    """
-    q = news_stream.subscribe()
-    while True:
-        try:
-            item = q.get()
-            if (item.get("importance") or 0) >= 5:
-                notify.headline_alert(item, log=log)
-        except Exception as e:
-            log(f"alert loop error (non-fatal): {e}")
-            time.sleep(5)
 
 
 _started = False
@@ -365,10 +344,6 @@ def start_once():
             log(f"importance backfill skipped: {e}")
         news_stream.start(log=log)
         _start_grader()
-        notify.arm(log=log)
-        if notify.configured():
-            threading.Thread(target=_alert_loop, daemon=True,
-                             name="alerts").start()
         # Started last and in its own thread: a slow or unreachable sec.gov
         # must not delay the headline socket coming up.
         try:
