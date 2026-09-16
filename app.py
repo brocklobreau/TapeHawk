@@ -342,6 +342,13 @@ def start_once():
                                       classify.impact, log=log)
         except Exception as e:
             log(f"importance backfill skipped: {e}")
+        # A source that ignored its date parameters once wrote months-old
+        # filings into this table. Clearing them on boot means the page heals
+        # itself on the next deploy instead of showing December as "recent".
+        try:
+            store.prune_stale_filings(log=log)
+        except Exception as e:
+            log(f"filing prune skipped: {e}")
         news_stream.start(log=log)
         _start_grader()
         # Started last and in its own thread: a slow or unreachable sec.gov

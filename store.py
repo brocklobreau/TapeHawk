@@ -694,6 +694,25 @@ def halt_stats(days=30):
                 "AND resumed_at IS NOT NULL").fetchone()["n"]}
 
 
+def prune_stale_filings(keep_days=45, log=print):
+    """Delete filings older than the archive window.
+
+    Runs at startup because a bad ingest does not fix itself: a hundred 13Ds
+    from December were written to this table by a source that ignores its own
+    date parameters, and they would have sat on the page as "recent filings"
+    forever. Removing them on boot makes the fix self-healing rather than
+    something that needs a database surgeon.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+    c = _conn()
+    n = c.execute("DELETE FROM filings WHERE COALESCE(filed_at, seen_at) < ?",
+                  (cutoff,)).rowcount
+    c.commit()
+    if n:
+        log(f"store: removed {n} filing(s) older than {keep_days} days")
+    return n
+
+
 def prune(keep_days=45):
     """Keep the archive bounded. Render's smallest disk is 1GB; headlines are
     tiny but unbounded growth is still how a service dies six months from now

@@ -59,6 +59,22 @@ POLL_SECONDS = 90
 MIN_REQUEST_INTERVAL = 0.15      # ~7/s, comfortably under the SEC's cap of 10
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 
+# Nothing older than this is ingested, from ANY source.
+#
+# This exists because of a real failure: the full-text-search endpoint ignores
+# every date parameter it is given -- every documented spelling returns zero
+# hits -- so it answers with an arbitrary slice of its index. For 8-K that
+# slice happens to be today's filings. For SC 13D it was a hundred filings
+# from DECEMBER, which the page then showed as "recent 13D filings", sorted
+# newest-first so they looked entirely current.
+#
+# A stale row presented as current is worse than a missing row: one is a gap
+# you can see, the other is a lie you act on. So the age check sits in
+# collect(), where every source passes through, rather than in any one parser
+# -- and a source that can only offer stale rows now yields NOTHING and lets
+# the chain fall through to the next one.
+MAX_FEED_AGE_DAYS = 7
+
 # --- which 8-Ks are worth anyone's attention --------------------------------
 # Hundreds of 8-Ks are filed every day and almost all of them are procedural.
 # An 8-K feed carrying all of them is a feed nobody reads, and the genuinely
@@ -734,6 +750,40 @@ def enrich(cik, accession, log=print):
 
 # --- polling ----------------------------------------------------------------
 
+def _age_days(stamp):
+    """Age of a filing in days, or None when the stamp cannot be read.
+
+    Unknown age counts as fresh: every source in use stamps its rows, so this
+    is rare, and dropping a filing because its date was unparseable would lose
+    real data to guard against stale data.
+    """
+    s = str(stamp or "").strip()
+    if not s:
+        return None
+    try:
+        if len(s) <= 10:
+            d = datetime.fromisoformat(s[:10]).replace(tzinfo=timezone.utc)
+        else:
+            d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return (datetime.now(timezone.utc) - d).total_seconds() / 86400.0
+
+
+def drop_stale(rows, max_age_days=MAX_FEED_AGE_DAYS):
+    """(fresh rows, how many were dropped)."""
+    fresh, dropped = [], 0
+    for r in rows:
+        age = _age_days(r.get("filed_at"))
+        if age is not None and age > max_age_days:
+            dropped += 1
+        else:
+            fresh.append(r)
+    return fresh, dropped
+
+
 def collect(want="SC 13D", subject_only=True, log=print):
     """Recent filings of one form type, from whichever source answers.
 
@@ -745,20 +795,25 @@ def collect(want="SC 13D", subject_only=True, log=print):
     try:
         rows = parse_atom(_get(ATOM_URL.format(form=want.replace(" ", "+"))),
                           want=want, subject_only=subject_only)
+        rows, stale = drop_stale(rows)
         if rows:
             return rows, "atom"
         errors.append(
             f"atom: {_status.get('last_atom_entries', 0)} entries in the feed, "
-            f"0 matched {want}")
+            f"0 matched {want}" + (f", {stale} too old" if stale else ""))
     except Exception as e:
         errors.append(f"atom: {e}")
 
     try:
         rows = parse_efts(_get(EFTS_URL.format(form=want.replace(" ", "+")),
                                as_json=True), want=want)
+        rows, stale = drop_stale(rows)
         if rows:
             return rows, "full-text-search"
-        errors.append("full-text-search: 0 rows")
+        # The common case for this source, and the one that caused the bug:
+        # it answered, with rows, and every one of them was months old.
+        errors.append(f"full-text-search: 0 usable rows"
+                      + (f" ({stale} older than {MAX_FEED_AGE_DAYS} days)" if stale else ""))
     except Exception as e:
         errors.append(f"full-text-search: {e}")
 
@@ -776,6 +831,7 @@ def collect(want="SC 13D", subject_only=True, log=print):
     for day in days:
         try:
             rows = parse_daily_index(_get(_index_url_for(day)), want=want)
+            rows, stale = drop_stale(rows)
             if rows:
                 return rows, f"daily-index {day.isoformat()}"
         except Exception as e:
