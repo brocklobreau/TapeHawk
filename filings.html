@@ -254,7 +254,7 @@
         '</div>';
     } else {
       tablewrap.innerHTML='<table><thead><tr>'+
-        '<th>Filed</th><th>Company</th><th>Ticker</th><th>Filed by</th>'+
+        '<th>Filed (ET)</th><th>Company</th><th>Ticker</th><th>Filed by</th>'+
         '<th style="text-align:right">Stake</th><th style="text-align:right">Shares</th>'+
         '<th>Type</th></tr></thead><tbody>'+
         rows.map(function(f){
@@ -317,7 +317,7 @@
     }
 
     eightkwrap.innerHTML='<table><thead><tr>'+
-      '<th>Filed</th><th>Company</th><th>Ticker</th><th>What was filed</th>'+
+      '<th>Filed (ET)</th><th>Company</th><th>Ticker</th><th>What was filed</th>'+
       '<th>Read</th><th>Wire</th><th>Doc</th></tr></thead><tbody>'+
       shown.map(function(f){
         var dir=f.direction||'unclear';

@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS filings (
   direction        TEXT,
   uncovered        INTEGER,
   coverage_at      TEXT,
+  time_tried       INTEGER,
   form             TEXT NOT NULL,
   issuer_cik       INTEGER,
   issuer_name      TEXT,
@@ -174,7 +175,8 @@ def _conn():
         fhave = {r["name"] for r in c.execute("PRAGMA table_info(filings)")}
         for col, ddl in (("kind", "TEXT NOT NULL DEFAULT '13d'"), ("items", "TEXT"),
                          ("labels", "TEXT"), ("direction", "TEXT"),
-                         ("uncovered", "INTEGER"), ("coverage_at", "TEXT")):
+                         ("uncovered", "INTEGER"), ("coverage_at", "TEXT"),
+                         ("time_tried", "INTEGER")):
             if col not in fhave:
                 c.execute(f"ALTER TABLE filings ADD COLUMN {col} {ddl}")
         c.executescript(INDEX_SQL)          # only now are all columns present
@@ -433,9 +435,11 @@ def scoreboard(days=30):
         by_impact[lvl] = summarise([r for r in all_rows if r["impact_level"] == lvl])
     by_impact["unrated"] = summarise([r for r in all_rows if not r["impact_level"]])
 
-    by_tone = {}
-    for t in ("positive", "negative", "unclear"):
-        by_tone[t] = summarise([r for r in all_rows if r["tone"] == t])
+    def split_by_tone(rs):
+        return {t: summarise([r for r in rs if r["tone"] == t])
+                for t in ("positive", "negative", "unclear")}
+
+    by_tone = split_by_tone(all_rows)
 
     by_cat = {}
     for r in all_rows:
@@ -464,6 +468,13 @@ def scoreboard(days=30):
                         "WHERE graded_at IS NOT NULL AND move_60m IS NULL").fetchone()["n"]
     return {"days": days, "flat_band": FLAT_BAND_PCT,
             "overall": summarise(all_rows), "big_news": summarise(big),
+            # The same split, but for Big News on its own. A single "median
+            # move" over the whole rail pools good news, bad news and the
+            # unreadable together, so the number a reader most wants -- what
+            # did the stock do when the rail called it POSITIVE -- was not on
+            # the page anywhere.
+            "big_by_tone": split_by_tone(big),
+            "overall_by_tone": by_tone,
             "recent_big": recent_big,
             "by_impact": by_impact, "by_tone": by_tone, "by_category": by_cat,
             "recent": recent, "pending": pending, "ungradeable": skipped}
@@ -502,6 +513,26 @@ def insert_filing(f):
          f.get("latency_ms"), f.get("url"), f.get("source")))
     c.commit()
     return cur.rowcount > 0
+
+
+def filings_missing_time(limit=12):
+    """Rows whose filed_at is a bare date, newest first, skipping any already
+    tried and found to have no readable stamp."""
+    return [dict(r) for r in _conn().execute(
+        "SELECT accession, issuer_cik, seen_at FROM filings "
+        "WHERE filed_at IS NOT NULL AND filed_at NOT LIKE '%T%' "
+        "AND (time_tried IS NULL OR time_tried = 0) "
+        "ORDER BY filed_at DESC, id DESC LIMIT ?", (limit,)).fetchall()]
+
+
+def set_filed_at(accession, filed_at, latency_ms, give_up=False):
+    c = _conn()
+    if give_up:
+        c.execute("UPDATE filings SET time_tried = 1 WHERE accession = ?", (accession,))
+    else:
+        c.execute("UPDATE filings SET filed_at = ?, latency_ms = ?, time_tried = 1 "
+                  "WHERE accession = ?", (filed_at, latency_ms, accession))
+    c.commit()
 
 
 def dismiss_filing(accession):

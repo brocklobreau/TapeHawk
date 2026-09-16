@@ -206,6 +206,35 @@
   // showTone adds the two columns that only make sense when the rows ARE the
   // tones: which way each group actually went, and how far. Everywhere else
   // those columns would be a blend of good and bad news and mean nothing.
+  // The average move when the rail said positive, when it said negative, and
+  // the count it could not read. Signed, on purpose: "+3.1%" for positive
+  // calls and "-2.7%" for negative ones is the number a reader can check
+  // against their own experience, where a pooled 2.9% absolute is not.
+  function toneStrip(bt, what){
+    if(!bt) return '';
+    var p=bt.positive, n=bt.negative, u=bt.unclear;
+    if(!p && !n && !u) return '';
+    function tile(label, s, colorable){
+      if(!s) return '<div class="stat"><div class="k">'+label+'</div>'+
+        '<div class="v dim">—</div><div class="n">none in this window</div></div>';
+      var v = s.mean_signed;
+      var cls = colorable ? (v>0?'up':(v<0?'down':'')) : '';
+      return '<div class="stat"><div class="k">'+label+'</div>'+
+        '<div class="v '+cls+'">'+(v>0?'+':'')+(+v).toFixed(2)+'%</div>'+
+        '<div class="n">average move, '+s.n+' call'+(s.n===1?'':'s')+thin(s.n)+
+        ' · median '+(s.median_signed>0?'+':'')+(+s.median_signed).toFixed(2)+'%</div></div>';
+    }
+    return '<div class="hero" style="margin-top:12px">'+
+      tile('Called positive → avg gain', p, true)+
+      tile('Called negative → avg move', n, true)+
+      tile('Direction unclear', u, false)+
+    '</div>'+
+    '<p class="caveat" style="margin:10px 0 0">'+what+' split by what the rail '+
+    'said. "Called positive" should be clearly above zero and "Called negative" '+
+    'clearly below it. The unclear column is shown so nothing is hidden, but its '+
+    'average is meaningless by construction — no direction was claimed.</p>';
+  }
+
   function breakdown(title, obj, labelMap, note, showTone){
     var keys=Object.keys(obj||{}).filter(function(k){return obj[k];});
     if(!keys.length) return '';
@@ -244,7 +273,8 @@
     // as the control -- "big news moved 7%" is not a finding until you know
     // what an ordinary headline moved.
     parts.push('<section class="panel"><h2>⚡ Big News — the calls that matter</h2>'+
-      '<div class="pad">'+statRow(d.big_news)+'</div></section>');
+      '<div class="pad">'+statRow(d.big_news)+toneStrip(d.big_by_tone, 'Big News calls')+
+      '</div></section>');
 
     var lift = '';
     if (d.big_news && d.overall && d.big_news.median_abs_move != null
@@ -260,7 +290,7 @@
       'stock actually did. The misses are in here too — that is the point.'));
 
     parts.push('<section class="panel"><h2>Every headline — the comparison</h2>'+
-      '<div class="pad">'+lift+statRow(d.overall)+
+      '<div class="pad">'+lift+statRow(d.overall)+toneStrip(d.overall_by_tone, 'Every headline,')+
       '<p class="caveat" style="margin:10px 0 0">This row exists to make the one '+
       'above mean something. Without knowing what an ordinary headline does, '+
       '"Big News moved 7%" is a number with nothing to be measured against.</p>'+

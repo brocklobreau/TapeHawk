@@ -45,6 +45,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -53,6 +54,14 @@ ATOM_URL = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent"
 DAILY_INDEX = "https://www.sec.gov/Archives/edgar/daily-index/{year}/QTR{qtr}/form.{ymd}.idx"
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 ARCHIVE = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc}"
+# EDGAR stamps acceptance times in Eastern time with no offset in the string.
+# Attached explicitly so a stamp never gets read as UTC (four hours out, and
+# after 8pm ET, a different DAY).
+EDGAR_TZ = ZoneInfo("America/New_York")
+# How many date-only rows already in the database get their exact time filled
+# in per poll. Small on purpose: a burst of Archives requests is what drew
+# 403s in production, and the backlog only ever has to drain once.
+MAX_TIME_BACKFILL = 12
 
 TIMEOUT = 20
 POLL_SECONDS = 90
@@ -111,7 +120,7 @@ ALL_8K_ITEMS = {
     "3.01", "3.02", "3.03",
     "4.01", "4.02",
     "5.01", "5.02", "5.03", "5.04", "5.05", "5.06", "5.07", "5.08",
-    "6.01", "6.02", "6.03", "6.04", "6.05",
+    "6.01", "6.02", "6.03", "6.04", "6.05", "6.06",
     "7.01", "8.01", "9.01",
 }
 ITEM_LABELS = {
@@ -338,6 +347,65 @@ def _is_form(form, want):
 
 _ITEM_RE = re.compile(r"\b(\d{1,2}\.\d{2})\b")
 
+# The SGML header names items by TITLE, not number:
+#     ITEM INFORMATION:        Other Events
+#     ITEM INFORMATION:        Financial Statements and Exhibits
+# A parser that only knows the numbers reads that header as "no items", and
+# the caller then dismisses the filing as routine -- permanently, since
+# dismissed accessions are never re-read. Titles are matched on a distinctive
+# phrase each, after punctuation is stripped, and ONLY on ITEM INFORMATION
+# lines so that the words "other events" in a document body never become an
+# item code.
+_TITLE_TO_ITEM = [
+    ("entry into a material definitive agreement", "1.01"),
+    ("termination of a material definitive agreement", "1.02"),
+    ("bankruptcy or receivership", "1.03"),
+    ("mine safety", "1.04"),
+    ("material cybersecurity incident", "1.05"),
+    ("completion of acquisition or disposition of assets", "2.01"),
+    ("results of operations and financial condition", "2.02"),
+    ("creation of a direct financial obligation", "2.03"),
+    ("triggering events that accelerate", "2.04"),
+    ("costs associated with exit or disposal activities", "2.05"),
+    ("material impairments", "2.06"),
+    ("notice of delisting", "3.01"),
+    ("unregistered sales of equity securities", "3.02"),
+    ("material modification to rights of security holders", "3.03"),
+    ("changes in registrants certifying accountant", "4.01"),
+    ("non reliance on previously issued financial statements", "4.02"),
+    ("nonreliance on previously issued financial statements", "4.02"),
+    ("changes in control of registrant", "5.01"),
+    ("departure of directors or certain officers", "5.02"),
+    ("departure of directors or principal officers", "5.02"),
+    ("election of directors", "5.02"),
+    ("appointment of certain officers", "5.02"),
+    ("compensatory arrangements of certain officers", "5.02"),
+    ("amendments to articles of incorporation or bylaws", "5.03"),
+    ("temporary suspension of trading under registrants employee benefit plans", "5.04"),
+    ("code of ethics", "5.05"),
+    ("change in shell company status", "5.06"),
+    ("submission of matters to a vote of security holders", "5.07"),
+    ("shareholder director nominations", "5.08"),
+    ("abs informational and computational material", "6.01"),
+    ("change of servicer or trustee", "6.02"),
+    ("change in credit enhancement", "6.03"),
+    ("failure to make a required distribution", "6.04"),
+    ("securities act updating disclosure", "6.05"),
+    ("static pool", "6.06"),
+    ("regulation fd disclosure", "7.01"),
+    ("other events", "8.01"),
+    ("financial statements and exhibits", "9.01"),
+]
+_ITEM_LINE = re.compile(r"ITEM\s+INFORMATION\s*:?\s*(.*)", re.I)
+_PUNCT = re.compile(r"[^a-z0-9 ]+")
+
+
+def _norm(t):
+    # Apostrophes are REMOVED, not replaced: "Registrant's" must become
+    # "registrants", not "registrant s", or 4.01 and 5.04 never match.
+    t = str(t or "").lower().replace("'", "").replace("\u2019", "").replace("-", " ")
+    return _PUNCT.sub(" ", t).split()
+
 
 def parse_items(text):
     """Item codes out of whatever text EDGAR gives us.
@@ -350,9 +418,18 @@ def parse_items(text):
     if not text:
         return []
     found = []
-    for m in _ITEM_RE.findall(str(text)):
+    text = str(text)
+    for m in _ITEM_RE.findall(text):
         if m in ALL_8K_ITEMS and m not in found:
             found.append(m)
+    for line in text.splitlines():
+        m = _ITEM_LINE.search(line)
+        if not m:
+            continue
+        words = " ".join(_norm(m.group(1)))
+        for phrase, code in _TITLE_TO_ITEM:
+            if phrase in words and code not in found:
+                found.append(code)
     return found
 
 
@@ -441,6 +518,33 @@ def _filing_url(ciks, accession):
 
 # --- source 3: the end-of-day index -----------------------------------------
 
+# The SGML header is read for two different things -- the item codes and the
+# acceptance time -- sometimes for the same filing in the same poll. Cached so
+# the second question never costs a second request. Bounded because the
+# process runs for weeks.
+_HEADER_CACHE = {}
+_HEADER_CACHE_MAX = 400
+
+
+def _read_header(cik, accession, log=print):
+    """The filing's -index-headers.html, or '' on any failure."""
+    if not cik or not accession:
+        return ""
+    if accession in _HEADER_CACHE:
+        return _HEADER_CACHE[accession]
+    url = (ARCHIVE.format(cik=int(cik), acc=accession.replace("-", ""))
+           + f"/{accession}-index-headers.html")
+    try:
+        text = _get(url)
+    except Exception as e:
+        log(f"filings: could not read header for {accession} ({e})")
+        return ""
+    if len(_HEADER_CACHE) >= _HEADER_CACHE_MAX:
+        _HEADER_CACHE.pop(next(iter(_HEADER_CACHE)))
+    _HEADER_CACHE[accession] = text
+    return text
+
+
 def fetch_items(cik, accession, log=print):
     """Item codes from the filing's own SGML header.
 
@@ -451,15 +555,77 @@ def fetch_items(cik, accession, log=print):
     guess here would put a routine filing in a list whose whole promise is
     that everything in it matters.
     """
-    if not cik or not accession:
-        return []
-    url = (ARCHIVE.format(cik=int(cik), acc=accession.replace("-", ""))
-           + f"/{accession}-index-headers.html")
+    text = _read_header(cik, accession, log=log)
+    return parse_items(text) if text else []
+
+
+# EDGAR renders the SGML tag either raw or HTML-escaped depending on the page.
+_ACCEPTED = re.compile(r"ACCEPTANCE-DATETIME(?:&gt;|>)\s*(\d{14})")
+
+
+def parse_accepted(header_text):
+    """The exact second EDGAR accepted the filing, as ISO-8601 in Eastern time.
+
+    The feeds that list filings carry only a calendar date -- the full-text
+    index and the daily index both stamp '2026-09-15' and nothing more -- so
+    most rows arrived with a day and no time. The header has the real stamp,
+    to the second. Returns None when it cannot be read: a missing time is
+    shown as a missing time, never invented as midnight.
+    """
+    m = _ACCEPTED.search(header_text or "")
+    if not m:
+        return None
     try:
-        return parse_items(_get(url))
-    except Exception as e:
-        log(f"filings: could not read items for {accession} ({e})")
-        return []
+        return datetime.strptime(m.group(1), "%Y%m%d%H%M%S").replace(
+            tzinfo=EDGAR_TZ).isoformat()
+    except ValueError:
+        return None
+
+
+def _has_time(stamp):
+    return bool(stamp) and "T" in str(stamp)
+
+
+def fetch_accepted(cik, accession, log=print):
+    return parse_accepted(_read_header(cik, accession, log=log))
+
+
+def with_exact_time(f, log=print):
+    """Upgrade a date-only filed_at to the acceptance stamp, in place.
+
+    Only fetches when the stamp is missing its time, so rows from the Atom
+    feed (which already carries one) cost nothing extra.
+    """
+    if _has_time(f.get("filed_at")):
+        return False
+    stamp = fetch_accepted(f.get("issuer_cik"), f.get("accession"), log=log)
+    if not stamp:
+        return False
+    f["filed_at"] = stamp
+    return True
+
+
+def backfill_times(store, log=print):
+    """Fill in exact times for rows stored before this existed, a few per poll.
+
+    The live table held weeks of 8-Ks stamped with a bare date. Rather than
+    hammer sec.gov on boot to fix them all at once, each poll fixes a handful,
+    newest first -- the rows a reader is actually looking at heal first.
+    """
+    rows = store.filings_missing_time(limit=MAX_TIME_BACKFILL)
+    fixed = 0
+    for r in rows:
+        stamp = fetch_accepted(r.get("issuer_cik"), r.get("accession"), log=log)
+        if stamp:
+            store.set_filed_at(r["accession"], stamp,
+                               _latency_ms(stamp, r.get("seen_at")))
+            fixed += 1
+        else:
+            # Do not ask again next poll for a header that has no stamp.
+            store.set_filed_at(r["accession"], None, None, give_up=True)
+    if rows:
+        log(f"filings: exact times filled in for {fixed} of {len(rows)} older row(s)")
+    return fixed
 
 
 # --- reading the document ---------------------------------------------------
@@ -887,6 +1053,10 @@ def poll_13d(store, log=print):
         f["cusip"] = detail.get("cusip")
         f["reporting_person"] = detail.get("reporting_person")
         f["seen_at"] = seen_at
+        # The header for the 13D's issuer CIK may differ from the filer's; the
+        # accession is the same either way, and that is what the URL is built
+        # from once the CIK resolves.
+        with_exact_time(f, log=log)
         f["latency_ms"] = _latency_ms(f.get("filed_at"), seen_at)
         if store.insert_filing(f):
             stored += 1
@@ -1018,6 +1188,10 @@ def poll_8k(store, log=print):
         f["direction"] = direction
         f["ticker"] = tickers.get(f.get("issuer_cik"))
         f["seen_at"] = seen_at
+        # The exact time comes from the same header the item codes came from,
+        # so for a filing whose header was already read this is free; for the
+        # rest it is one request per filing actually being stored.
+        with_exact_time(f, log=log)
         f["latency_ms"] = _latency_ms(f.get("filed_at"), seen_at)
         if store.insert_filing(f):
             stored += 1
@@ -1025,6 +1199,10 @@ def poll_8k(store, log=print):
                 f"{f.get('ticker') or f.get('issuer_name') or '?'} — "
                 + "; ".join(labels))
     _status["stored_8k"] += stored
+    try:
+        backfill_times(store, log=log)
+    except Exception as e:
+        log(f"filings: time backfill skipped ({e})")
     if stored or skipped:
         log(f"filings: {stored} notable 8-K(s) from {len(rows)} filings "
             f"({looked} headers, {bodies} documents read"
