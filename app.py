@@ -181,22 +181,27 @@ def api_earnings():
         return {"error": "Earnings history unavailable right now."}, 502
 
 
-@app.route("/stakes")
-def stakes_page():
-    return send_from_directory(HERE, "stakes.html")
+@app.route("/filings")
+def filings_page():
+    return send_from_directory(HERE, "filings.html")
 
 
-@app.route("/api/stakes")
-def api_stakes():
+@app.route("/api/filings")
+def api_filings():
     try:
-        return {"filings": store.recent_filings(
-                    limit=int(request.args.get("limit", 100)),
-                    ticker=(request.args.get("ticker") or "").strip() or None,
+        ticker = (request.args.get("ticker") or "").strip() or None
+        limit = int(request.args.get("limit", 100))
+        return {"stakes": store.recent_filings(
+                    limit=limit, ticker=ticker, kind="13d",
                     amendments=request.args.get("initial_only") != "1"),
+                "eightk": store.recent_filings(
+                    limit=limit, ticker=ticker, kind="8k",
+                    direction=(request.args.get("direction") or "").strip() or None),
+                "item_labels": filings.ITEM_LABELS,
                 "stats": store.filing_stats(),
                 "watcher": filings.status()}
     except Exception as e:
-        log(f"stakes failed: {e}")
+        log(f"filings page failed: {e}")
         return {"error": "Could not read the filings."}, 500
 
 

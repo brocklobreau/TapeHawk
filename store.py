@@ -71,6 +71,12 @@ FILINGS_SQL = """
 CREATE TABLE IF NOT EXISTS filings (
   id               INTEGER PRIMARY KEY,
   accession        TEXT UNIQUE,
+  kind             TEXT NOT NULL DEFAULT '13d',
+  items            TEXT,
+  labels           TEXT,
+  direction        TEXT,
+  uncovered        INTEGER,
+  coverage_at      TEXT,
   form             TEXT NOT NULL,
   issuer_cik       INTEGER,
   issuer_name      TEXT,
@@ -85,6 +91,15 @@ CREATE TABLE IF NOT EXISTS filings (
   url              TEXT,
   source           TEXT
 );
+
+-- Accession numbers of 8-Ks already judged routine. Reading an 8-K's header
+-- costs a request, and without this ledger every poll would re-read the
+-- header of every routine 8-K still in the feed window, forever. Storing the
+-- verdict rather than the filing keeps this table tiny.
+CREATE TABLE IF NOT EXISTS filings_seen (
+  accession TEXT PRIMARY KEY,
+  at        TEXT NOT NULL
+);
 """
 
 INDEX_SQL = """
@@ -94,6 +109,8 @@ CREATE INDEX IF NOT EXISTS idx_importance ON headlines(importance DESC, id DESC)
 CREATE INDEX IF NOT EXISTS idx_ungraded ON headlines(graded_at, created_at);
 CREATE INDEX IF NOT EXISTS idx_filings_seen ON filings(seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_filings_ticker ON filings(ticker, seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_filings_kind ON filings(kind, seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_filings_coverage ON filings(coverage_at, seen_at);
 """
 
 
@@ -125,6 +142,17 @@ def _conn():
                          ("grade_note", "TEXT")):
             if col not in have:
                 c.execute(f"ALTER TABLE headlines ADD COLUMN {col} {ddl}")
+        # Same treatment for filings. A database created by the 13D-only
+        # version already has this table, so CREATE TABLE IF NOT EXISTS leaves
+        # it alone -- and idx_filings_kind below would then fail with "no such
+        # column: kind" and take the service down on deploy. This is the
+        # identical trap that the importance column set once already.
+        fhave = {r["name"] for r in c.execute("PRAGMA table_info(filings)")}
+        for col, ddl in (("kind", "TEXT NOT NULL DEFAULT '13d'"), ("items", "TEXT"),
+                         ("labels", "TEXT"), ("direction", "TEXT"),
+                         ("uncovered", "INTEGER"), ("coverage_at", "TEXT")):
+            if col not in fhave:
+                c.execute(f"ALTER TABLE filings ADD COLUMN {col} {ddl}")
         c.executescript(INDEX_SQL)          # only now are all columns present
         c.commit()
         _local.conn = c
@@ -388,10 +416,14 @@ def insert_filing(f):
     c = _conn()
     cur = c.execute(
         """INSERT OR IGNORE INTO filings
-           (accession, form, issuer_cik, issuer_name, ticker, reporting_person,
-            percent, shares, cusip, filed_at, seen_at, latency_ms, url, source)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (f.get("accession"), f.get("form", "SC 13D"), f.get("issuer_cik"),
+           (accession, kind, items, labels, direction, form, issuer_cik,
+            issuer_name, ticker, reporting_person, percent, shares, cusip,
+            filed_at, seen_at, latency_ms, url, source)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (f.get("accession"), f.get("kind", "13d"),
+         json.dumps(f.get("items") or []),
+         json.dumps(f.get("labels") or []), f.get("direction"),
+         f.get("form", "SC 13D"), f.get("issuer_cik"),
          f.get("issuer_name"), f.get("ticker"), f.get("reporting_person"),
          f.get("percent"), f.get("shares"), f.get("cusip"), f.get("filed_at"),
          f.get("seen_at") or datetime.now(timezone.utc).isoformat(),
@@ -400,9 +432,38 @@ def insert_filing(f):
     return cur.rowcount > 0
 
 
-def recent_filings(limit=100, ticker=None, amendments=True):
+def dismiss_filing(accession):
+    """Record that a filing was looked at and judged not worth listing."""
+    c = _conn()
+    c.execute("INSERT OR IGNORE INTO filings_seen (accession, at) VALUES (?,?)",
+              (accession, datetime.now(timezone.utc).isoformat()))
+    c.commit()
+
+
+def filing_dismissed(accession):
+    if not accession:
+        return False
+    return _conn().execute("SELECT 1 FROM filings_seen WHERE accession = ?",
+                           (accession,)).fetchone() is not None
+
+
+def _filing_row(r):
+    d = dict(r)
+    d["items"] = json.loads(d.get("items") or "[]")
+    d["labels"] = json.loads(d.get("labels") or "[]")
+    return d
+
+
+def recent_filings(limit=100, ticker=None, amendments=True, kind=None,
+                   direction=None):
     sql = "SELECT * FROM filings WHERE 1=1"
     args = []
+    if kind:
+        sql += " AND kind = ?"
+        args.append(kind)
+    if direction:
+        sql += " AND direction = ?"
+        args.append(direction)
     if ticker:
         sql += " AND ticker = ?"
         args.append(ticker.upper())
@@ -412,27 +473,79 @@ def recent_filings(limit=100, ticker=None, amendments=True):
         sql += " AND form NOT LIKE '%/A'"
     sql += " ORDER BY COALESCE(filed_at, seen_at) DESC, id DESC LIMIT ?"
     args.append(min(int(limit), 300))
-    return [dict(r) for r in _conn().execute(sql, args)]
+    return [_filing_row(r) for r in _conn().execute(sql, args)]
+
+
+def filings_needing_coverage(cutoff_iso, limit=50):
+    """Stored filings old enough to judge and not yet checked against the
+    headline archive. Oldest first so a backlog drains in order."""
+    rows = _conn().execute(
+        "SELECT accession, ticker, filed_at, seen_at FROM filings "
+        "WHERE coverage_at IS NULL AND kind = '8k' "
+        "AND COALESCE(filed_at, seen_at) < ? "
+        "ORDER BY COALESCE(filed_at, seen_at) ASC LIMIT ?",
+        (cutoff_iso, int(limit)))
+    return [dict(r) for r in rows]
+
+
+def set_coverage(accession, uncovered):
+    """Always stamps coverage_at, including when the verdict is unknown --
+    otherwise an unjudgeable filing is retried on every pass forever."""
+    c = _conn()
+    c.execute("UPDATE filings SET uncovered = ?, coverage_at = ? WHERE accession = ?",
+              (uncovered, datetime.now(timezone.utc).isoformat(), accession))
+    c.commit()
+
+
+def headlines_mentioning(symbol, start_iso, end_iso):
+    """How many headlines tagged this ticker in a window. Uses created_at --
+    when the news happened -- not received_at, so a restart that backfills the
+    archive later does not make an uncovered filing look covered."""
+    if not symbol:
+        return 0
+    return _conn().execute(
+        "SELECT COUNT(*) n FROM headlines WHERE symbols LIKE ? "
+        "AND created_at >= ? AND created_at <= ?",
+        (f'%"{symbol.upper()}"%', start_iso, end_iso)).fetchone()["n"]
 
 
 def filing_stats(days=30):
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     c = _conn()
-    total = c.execute("SELECT COUNT(*) n FROM filings").fetchone()["n"]
-    window = c.execute("SELECT COUNT(*) n FROM filings WHERE seen_at > ?",
-                       (since,)).fetchone()["n"]
-    fresh = c.execute("SELECT COUNT(*) n FROM filings WHERE form NOT LIKE '%/A'"
-                      ).fetchone()["n"]
+
+    def n(sql, args=()):
+        return c.execute("SELECT COUNT(*) n FROM filings WHERE " + sql, args).fetchone()["n"]
+
+    total_13d = n("kind = '13d'")
+    fresh = n("kind = '13d' AND form NOT LIKE '%/A'")
+    total_8k = n("kind = '8k'")
     lat = c.execute("SELECT AVG(latency_ms) a, MIN(latency_ms) m FROM filings "
                     "WHERE latency_ms IS NOT NULL").fetchone()
     top = [dict(r) for r in c.execute(
         "SELECT reporting_person p, COUNT(*) n FROM filings "
-        "WHERE reporting_person IS NOT NULL AND reporting_person != '' "
-        "GROUP BY p ORDER BY n DESC, p ASC LIMIT 8")]
-    return {"total": total, "window": window, "days": days,
-            "initial": fresh, "amendments": total - fresh,
+        "WHERE kind = '13d' AND reporting_person IS NOT NULL "
+        "AND reporting_person != '' GROUP BY p ORDER BY n DESC, p ASC LIMIT 8")]
+    # Counted against filings actually JUDGED, not against every 8-K stored.
+    # A percentage whose denominator quietly includes rows nobody has checked
+    # yet is the kind of number that reads as measurement and is not.
+    judged = n("kind = '8k' AND uncovered IS NOT NULL")
+    uncovered = n("kind = '8k' AND uncovered = 1")
+    by_item, by_dir = {}, {}
+    for r in c.execute("SELECT items, direction FROM filings WHERE kind = '8k'"):
+        for it in json.loads(r["items"] or "[]"):
+            by_item[it] = by_item.get(it, 0) + 1
+        d = r["direction"] or "unclear"
+        by_dir[d] = by_dir.get(d, 0) + 1
+    return {"days": days,
+            "total": total_13d, "window": n("kind = '13d' AND seen_at > ?", (since,)),
+            "initial": fresh, "amendments": total_13d - fresh,
             "avg_latency_ms": round(lat["a"]) if lat["a"] else None,
-            "best_latency_ms": lat["m"], "top_filers": top}
+            "best_latency_ms": lat["m"], "top_filers": top,
+            "eightk_total": total_8k,
+            "eightk_window": n("kind = '8k' AND seen_at > ?", (since,)),
+            "eightk_judged": judged, "eightk_uncovered": uncovered,
+            "eightk_by_item": dict(sorted(by_item.items(), key=lambda kv: -kv[1])),
+            "eightk_by_direction": by_dir}
 
 
 def prune(keep_days=45):
