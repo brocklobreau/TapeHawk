@@ -81,6 +81,18 @@
   .code.ipo    { background:rgba(63,191,95,.13); color:var(--good);
                  border-color:rgba(63,191,95,.3); }
   .code.unknown { border-style:dashed; }
+  /* Which way it was moving into the halt, and how many times it has halted
+     today. Both sit under the symbol because they are properties of the
+     halt, not of the code. */
+  .dir { font-family:var(--mono); font-size:11px; font-weight:700; padding:1px 6px;
+         border-radius:4px; display:inline-block; margin-top:3px; }
+  .dir.up   { background:rgba(63,191,95,.13); color:var(--good); }
+  .dir.down { background:rgba(240,74,74,.14); color:var(--bad); }
+  .dir.flat, .dir.unknown { background:var(--surface-2); color:var(--faint); }
+  .seq { font-family:var(--mono); font-size:11px; color:var(--muted); margin-left:5px; white-space:nowrap; }
+  #dirrate td:first-child { white-space:nowrap; }
+  .seq.hot { color:var(--accent); font-weight:700; }
+  tr.total td { background:var(--surface-2); }
   /* Capped so the note wraps instead of stretching the table, and NEVER
      hidden on a phone: the note is the most important cell in the row --
      "Can run for DAYS" on a T12 is the whole reason to look at this page, and
@@ -115,7 +127,16 @@
     background:linear-gradient(to bottom, rgba(18,22,27,0), var(--surface));
     border-radius:0 0 11px 11px; }
   .vwrap.more::after { opacity:1; }
-  @media (prefers-reduced-motion:reduce){ .vwrap::after { transition:none; } }
+  /* Same trap sideways. On a phone every table here is wider than the screen
+     and the columns that matter most -- the reopen-to-+60 move, "kept going"
+     -- are the ones off the right edge. Without this a reader never learns
+     they exist. */
+  .vwrap::before { content:''; position:absolute; top:0; bottom:0; right:0; width:34px;
+    pointer-events:none; opacity:0; transition:opacity .18s; z-index:1;
+    background:linear-gradient(to right, rgba(18,22,27,0), var(--surface));
+    border-radius:0 11px 11px 0; }
+  .vwrap.more-x::before { opacity:1; }
+  @media (prefers-reduced-motion:reduce){ .vwrap::after, .vwrap::before { transition:none; } }
   .rowcount { color:var(--faint); font-weight:400; font-size:11.5px; text-transform:none;
               letter-spacing:0; }
   .glossary td { font-size:12.5px; }
@@ -163,6 +184,11 @@
     <div class="vwrap"><div class="vscroll" id="baserate"></div></div>
   </section>
 
+  <section class="panel" id="dirpanel" style="display:none">
+    <h2>Up-halts vs down-halts, by halt number <span class="rowcount">the split that matters</span></h2>
+    <div class="vwrap"><div class="vscroll" id="dirrate"></div></div>
+  </section>
+
   <section class="panel">
     <h2>Code glossary</h2>
     <div class="vwrap"><div class="vscroll" id="glossary"></div></div>
@@ -174,6 +200,7 @@
   var hero=document.getElementById('hero'), tablewrap=document.getElementById('tablewrap'),
       filters=document.getElementById('filters'), glossary=document.getElementById('glossary'),
       baserate=document.getElementById('baserate'), basepanel=document.getElementById('basepanel'),
+      dirrate=document.getElementById('dirrate'), dirpanel=document.getElementById('dirpanel'),
       count=document.getElementById('count');
   var mode='', CODES={}, lastData=null;
 
@@ -205,8 +232,66 @@
   function note(code){ var c=CODES[(code||'').toUpperCase()];
     return c?c.note:'Not in this glossary — check the listing exchange before trading it'; }
 
+  // "#3 today" is the number a runner's regulars watch. Highlighted from the
+  // second halt on: a second halt is the signal, a first is just a halt.
+  function seqTag(q){
+    if(!q) return '';
+    // A real space before it, not just a margin: copied text and screen
+    // readers should get "MEDS #2 today", not "MEDS#2 today".
+    return ' <span class="seq'+(q>=2?' hot':'')+'" title="Halt number '+q+' for this symbol today">#'+q+' today</span>';
+  }
+  function dirTag(h){
+    if(!h.graded_at) return '';
+    var d=h.direction;
+    if(d==='up') return '<span class="dir up" title="Ran '+(h.run_in_pct!=null?'+'+(+h.run_in_pct).toFixed(1)+'%':'up')+' into the halt">▲ '+(h.run_in_pct!=null?'+'+(+h.run_in_pct).toFixed(1)+'% in':'up-halt')+'</span>';
+    if(d==='down') return '<span class="dir down" title="Fell '+(h.run_in_pct!=null?(+h.run_in_pct).toFixed(1)+'%':'')+' into the halt">▼ '+(h.run_in_pct!=null?(+h.run_in_pct).toFixed(1)+'% in':'down-halt')+'</span>';
+    if(d==='flat') return '<span class="dir flat" title="Was not moving much when halted">— flat in</span>';
+    return '';
+  }
+
+  function renderDirection(st){
+    var bd=st.by_direction||{}, bs=st.by_direction_seq||{};
+    var any=(bd.up||bd.down);
+    if(!any){ dirpanel.style.display='none'; return; }
+    dirpanel.style.display='';
+    // Short on purpose: on a phone this column is what decides whether the
+    // table fits, and "1st halt of the day" wrapped onto six lines.
+    var order=[['up','1','▲ 1st halt of day'],['up','2','▲ 2nd halt'],['up','3+','▲ 3rd halt or later'],
+               ['down','1','▼ 1st halt of day'],['down','2','▼ 2nd halt'],['down','3+','▼ 3rd halt or later']];
+    function row(labelHtml, s, cls){
+      if(!s) return '<tr class="'+cls+'"><td>'+labelHtml+'</td><td class="num dim" colspan="5">none measured yet</td></tr>';
+      var thin = s.n<10 ? ' <span class="dim">(too few)</span>' : '';
+      return '<tr class="'+cls+'"><td>'+labelHtml+'</td>'+
+        '<td class="num">'+s.n+thin+'</td>'+
+        '<td class="num">'+pct(s.median_gap)+'</td>'+
+        '<td class="num">'+s.gapped_up_pct.toFixed(0)+'%</td>'+
+        '<td class="num">'+pct(s.median_move_60m)+'</td>'+
+        '<td class="num">'+(s.continued_pct==null?'<span class="dim">—</span>'
+          :s.continued_pct.toFixed(0)+'% <span class="dim">n='+s.follow_n+'</span>')+'</td></tr>';
+    }
+    var html='<table><thead><tr><th>Halt</th><th class="num">N</th>'+
+      '<th class="num">Median gap</th><th class="num">Gapped up</th>'+
+      '<th class="num">Reopen → +60m</th><th class="num">Kept going</th></tr></thead><tbody>'+
+      row('<b>▲ All up-halts</b>', bd.up, 'total')+
+      order.filter(function(o){return o[0]==='up';}).map(function(o){
+        return row('<span class="dim">&nbsp;&nbsp;</span>'+esc(o[2]), (bs.up||{})[o[1]], ''); }).join('')+
+      row('<b>▼ All down-halts</b>', bd.down, 'total')+
+      order.filter(function(o){return o[0]==='down';}).map(function(o){
+        return row('<span class="dim">&nbsp;&nbsp;</span>'+esc(o[2]), (bs.down||{})[o[1]], ''); }).join('')+
+      '</tbody></table>'+
+      '<div class="empty" style="padding:12px 14px;font-size:12px">'+
+      '“Up-halt” means the stock had risen at least 1% in the 15 minutes before the halt; '+
+      '“down-halt” means it had fallen at least 1%. <b>Gapped up</b> is how often the reopening '+
+      'print was above the pre-halt price — for a down-halt, that is a bounce. <b>Reopen → +60m</b> '+
+      'is the signed median move for someone who bought the reopening print and held an hour. '+
+      (st.direction_unknown?st.direction_unknown+' measured halt(s) have no direction yet; older ones are filled in a few per pass.':'')+
+      '</div>';
+    dirrate.innerHTML=html;
+  }
+
   function render(d){
     var st=d.stats||{}, w=d.watcher||{}, rows=d.halts||[];
+    renderDirection(st);
     CODES=d.codes||CODES;
     var o=st.overall;
 
@@ -226,6 +311,8 @@
     var counts=st.counts||{};
     filters.innerHTML='<button class="chip'+(mode?'':' on')+'" data-code="">All halts</button>'+
       '<button class="chip'+(mode==='__open'?' on':'')+'" data-code="__open">Still halted</button>'+
+      '<button class="chip'+(mode==='__up'?' on':'')+'" data-code="__up">▲ Up-halts</button>'+
+      '<button class="chip'+(mode==='__down'?' on':'')+'" data-code="__down">▼ Down-halts</button>'+
       Object.keys(counts).map(function(c){
         return '<button class="chip'+(mode===c?' on':'')+'" data-code="'+esc(c)+'">'+
                esc(c)+' ('+counts[c]+')</button>';
@@ -233,6 +320,8 @@
 
     var shown=rows;
     if(mode==='__open') shown=rows.filter(function(h){ return !h.resumed_at; });
+    else if(mode==='__up') shown=rows.filter(function(h){ return h.direction==='up'; });
+    else if(mode==='__down') shown=rows.filter(function(h){ return h.direction==='down'; });
     else if(mode) shown=rows.filter(function(h){ return (h.code||'')===mode; });
     count.textContent=shown.length+' shown';
 
@@ -254,9 +343,10 @@
         return '<tr>'+
           '<td class="num">'+esc(clock(h.halted_at))+
             '<div class="dim" style="font-size:11px">'+esc(day(h.halted_at))+'</div></td>'+
-          '<td><span class="tick">'+esc(h.symbol)+'</span>'+
+          '<td><span class="tick">'+esc(h.symbol)+'</span>'+seqTag(h.seq)+
             (h.name?'<div class="dim" style="font-size:11px;max-width:16ch;overflow:hidden;'+
-              'text-overflow:ellipsis;white-space:nowrap">'+esc(h.name)+'</div>':'')+'</td>'+
+              'text-overflow:ellipsis;white-space:nowrap">'+esc(h.name)+'</div>':'')+
+            dirTag(h)+'</td>'+
           '<td><span class="code '+sev(h.code)+'">'+esc(h.code||'?')+'</span></td>'+
           '<td class="meaning"><b>'+esc(label(h.code))+'</b>'+
             '<span>'+esc(note(h.code))+'</span></td>'+
@@ -322,6 +412,7 @@
       var wrap=el.parentNode;
       if(!wrap || !wrap.classList.contains('vwrap')) return;
       wrap.classList.toggle('more', el.scrollHeight - el.clientHeight - el.scrollTop > 8);
+      wrap.classList.toggle('more-x', el.scrollWidth - el.clientWidth - el.scrollLeft > 8);
       if(!el.getAttribute('data-bound')){
         el.setAttribute('data-bound','1');
         el.addEventListener('scroll', markScrollables, {passive:true});

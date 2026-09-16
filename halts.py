@@ -234,6 +234,22 @@ def start(store, log=print):
 
 GRADE_AFTER_MINUTES = 75          # let the +60 horizon complete first
 MAX_GRADE_PER_RUN = 20
+RUN_IN_MINUTES = 15               # how far back the pre-halt move is measured
+# Below this the halt was not a directional move -- a news halt on a quiet
+# stock, say -- and calling it "up" on a 0.4% drift would put it in a table
+# whose whole purpose is to separate runners from fallers.
+MIN_RUN_IN_PCT = 1.0
+MAX_DIRECTION_BACKFILL = 10
+
+
+def classify_direction(run_in_pct):
+    if run_in_pct is None:
+        return None
+    if run_in_pct >= MIN_RUN_IN_PCT:
+        return "up"
+    if run_in_pct <= -MIN_RUN_IN_PCT:
+        return "down"
+    return "flat"
 
 
 def grade_pending(store, outcomes, log=print):
@@ -255,17 +271,36 @@ def grade_pending(store, outcomes, log=print):
         done += 1
     if done:
         log(f"halts: graded {done}")
+    # Halts measured before direction existed get measured again, a few per
+    # pass, so the split tables draw on history instead of starting empty.
+    # One bar request each; capped so it never competes with fresh grading.
+    redo = store.halts_needing_direction(limit=MAX_DIRECTION_BACKFILL)
+    fixed = 0
+    for h in redo:
+        try:
+            result = measure_halt(h, outcomes)
+        except Exception as e:
+            log(f"halts: could not re-measure {h.get('symbol')} ({e})")
+            result = None
+        store.mark_halt_graded(h["halt_key"], result or {})
+        fixed += 1 if result and result.get("direction") else 0
+    if redo:
+        log(f"halts: direction filled in for {fixed} of {len(redo)} older halt(s)")
     return done
 
 
 def measure_halt(h, outcomes):
-    """Returns the reopening gap and the follow-through, or None.
+    """Returns the reopening gap, the run-in, and the follow-through, or None.
 
-    pre   = close of the last bar ENDING at or before the halt
-    open  = open of the first bar STARTING at or after the resumption
-    The bar containing the halt is deliberately excluded from `pre`: it holds
-    the spike that caused the halt, so using it would measure the move against
-    a price the market never settled at.
+    into  = close of the bar CONTAINING the halt: the last print before it.
+            Nothing trades during a halt, so that bar's close is the halt
+            price itself, which is the number a trader is holding against.
+    open  = open of the bar containing the resumption: the reopening print.
+    pre   = close of the last bar ending before the halt -- the settled price
+            before the move that caused it. Kept for the record; the gap is
+            no longer measured from it, because for a volatility halt the
+            move between pre and into IS the halt, and a "gap" that included
+            it made every up-halt look like it gapped up at the reopen.
     """
     symbol, resumed = h.get("symbol"), h.get("resumed_at")
     if not symbol or not resumed or not h.get("halted_at"):
@@ -277,10 +312,11 @@ def measure_halt(h, outcomes):
     bars = outcomes.fetch_bars(symbol, t_open.date())
     if not bars:
         return None
+    five = timedelta(minutes=5)
 
     pre = None
     for dt, _o, c in bars:
-        if dt + timedelta(minutes=5) <= t_halt:
+        if dt + five <= t_halt:
             pre = c
         else:
             break
@@ -294,14 +330,44 @@ def measure_halt(h, outcomes):
     reopen = None
     reopen_idx = None
     for i, (dt, o, _c) in enumerate(bars):
-        if dt + timedelta(minutes=5) > t_open:
+        if dt + five > t_open:
             reopen, reopen_idx = o, i
             break
-    if not pre or not reopen or pre <= 0:
+    # The bar containing the halt. Its close is the last print before the
+    # halt -- unless the resumption fell inside the same bar, in which case
+    # its close is post-reopen and cannot be used.
+    into = None
+    for dt, _o, c in bars:
+        if dt <= t_halt < dt + five:
+            if dt + five <= t_open:
+                into = c
+            break
+    if into is None:
+        into = pre
+    if not into or not reopen or into <= 0:
         return None
 
-    out = {"pre_price": round(pre, 4), "reopen_price": round(reopen, 4),
-           "gap_pct": round((reopen - pre) / pre * 100, 2)}
+    # Which way was it moving when it halted? The feed does not say; the
+    # bars do. Measured from the last close at least RUN_IN_MINUTES before the
+    # halt to the halt price. A stock halted in its first bars of the day has
+    # no such close, so the session's opening print stands in -- the run-in
+    # is then "since the open", which is what a trader watching it would have
+    # called it too.
+    ref = None
+    t_ref = t_halt - timedelta(minutes=RUN_IN_MINUTES)
+    for dt, _o, c in bars:
+        if dt + five <= t_ref:
+            ref = c
+        else:
+            break
+    if ref is None and bars and bars[0][0] < t_halt:
+        ref = bars[0][1]
+    run_in = round((into - ref) / ref * 100, 2) if ref else None
+
+    out = {"pre_price": round(pre, 4) if pre else None,
+           "into_price": round(into, 4), "reopen_price": round(reopen, 4),
+           "gap_pct": round((reopen - into) / into * 100, 2),
+           "run_in_pct": run_in, "direction": classify_direction(run_in)}
     for mins, field in ((15, "move_15m"), (60, "move_60m")):
         target = t_open + timedelta(minutes=mins)
         val = None

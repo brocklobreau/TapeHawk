@@ -111,7 +111,11 @@ CREATE TABLE IF NOT EXISTS halts (
   reopen_price  REAL,
   gap_pct       REAL,
   move_15m      REAL,
-  move_60m      REAL
+  move_60m      REAL,
+  run_in_pct    REAL,
+  direction     TEXT,
+  seq           INTEGER,
+  into_price    REAL
 );
 
 -- Accession numbers of 8-Ks already judged routine. Reading an 8-K's header
@@ -179,6 +183,11 @@ def _conn():
                          ("time_tried", "INTEGER")):
             if col not in fhave:
                 c.execute(f"ALTER TABLE filings ADD COLUMN {col} {ddl}")
+        hhave = {r["name"] for r in c.execute("PRAGMA table_info(halts)")}
+        for col, ddl in (("run_in_pct", "REAL"), ("direction", "TEXT"),
+                         ("seq", "INTEGER"), ("into_price", "REAL")):
+            if col not in hhave:
+                c.execute(f"ALTER TABLE halts ADD COLUMN {col} {ddl}")
         c.executescript(INDEX_SQL)          # only now are all columns present
         c.commit()
         _local.conn = c
@@ -675,6 +684,7 @@ def upsert_halt(h):
             (h.get("halt_key"), h.get("symbol"), h.get("name"), h.get("market"),
              h.get("code"), h.get("halted_at"), h.get("halt_date"),
              h.get("quote_at"), h.get("resumed_at"), h.get("band_price"), now))
+        _resequence(c, h.get("symbol"), h.get("halt_date"))
         c.commit()
         return "new"
     if h.get("resumed_at") and not row["resumed_at"]:
@@ -685,7 +695,40 @@ def upsert_halt(h):
     return None
 
 
-def recent_halts(limit=120, symbol=None, code=None, open_only=False):
+def _resequence(c, symbol, halt_date):
+    """Number this symbol's halts for the day: 1st, 2nd, 3rd...
+
+    Recomputed for the whole group on every insert rather than counted once,
+    because the feed is polled and a halt can turn up after a later one was
+    already stored. A runner's fourth halt trades nothing like its first, and
+    that number is the only way the base rates can tell them apart.
+    """
+    if not symbol or not halt_date:
+        return
+    ids = [r["id"] for r in c.execute(
+        "SELECT id FROM halts WHERE symbol = ? AND halt_date = ? "
+        "ORDER BY COALESCE(halted_at, seen_at) ASC, id ASC", (symbol, halt_date))]
+    for n, rid in enumerate(ids, 1):
+        c.execute("UPDATE halts SET seq = ? WHERE id = ? AND (seq IS NULL OR seq != ?)",
+                  (n, rid, n))
+
+
+def resequence_all(log=print):
+    """One pass over rows stored before seq existed. Cheap: it is one query
+    per symbol-day, and there are not many of those."""
+    c = _conn()
+    groups = c.execute("SELECT DISTINCT symbol, halt_date FROM halts "
+                       "WHERE seq IS NULL AND symbol IS NOT NULL "
+                       "AND halt_date IS NOT NULL").fetchall()
+    for g in groups:
+        _resequence(c, g["symbol"], g["halt_date"])
+    c.commit()
+    if groups:
+        log(f"halts: numbered halts-of-the-day for {len(groups)} symbol-day(s)")
+
+
+def recent_halts(limit=120, symbol=None, code=None, open_only=False,
+                 direction=None):
     sql = "SELECT * FROM halts WHERE 1=1"
     args = []
     if symbol:
@@ -694,6 +737,9 @@ def recent_halts(limit=120, symbol=None, code=None, open_only=False):
     if code:
         sql += " AND code = ?"
         args.append(code.upper())
+    if direction in ("up", "down"):
+        sql += " AND direction = ?"
+        args.append(direction)
     if open_only:
         sql += " AND resumed_at IS NULL"
     sql += " ORDER BY COALESCE(halted_at, seen_at) DESC, id DESC LIMIT ?"
@@ -713,11 +759,28 @@ def halts_needing_grade(cutoff_iso, limit=20):
 def mark_halt_graded(halt_key, result):
     c = _conn()
     c.execute("UPDATE halts SET graded_at = ?, pre_price = ?, reopen_price = ?, "
-              "gap_pct = ?, move_15m = ?, move_60m = ? WHERE halt_key = ?",
+              "gap_pct = ?, move_15m = ?, move_60m = ?, run_in_pct = ?, "
+              "direction = ?, into_price = ? WHERE halt_key = ?",
               (datetime.now(timezone.utc).isoformat(), result.get("pre_price"),
                result.get("reopen_price"), result.get("gap_pct"),
-               result.get("move_15m"), result.get("move_60m"), halt_key))
+               result.get("move_15m"), result.get("move_60m"),
+               result.get("run_in_pct"),
+               # 'unknown' rather than NULL on a miss, so the backfill below
+               # does not pick the same unmeasurable halt up again every pass.
+               result.get("direction") or "unknown", result.get("into_price"),
+               halt_key))
     c.commit()
+
+
+def halts_needing_direction(limit=10):
+    """Halts graded before direction existed. Measured again, a few per
+    pass, so the split tables fill in from history rather than from zero."""
+    rows = _conn().execute(
+        "SELECT halt_key, symbol, code, halted_at, resumed_at FROM halts "
+        "WHERE graded_at IS NOT NULL AND gap_pct IS NOT NULL "
+        "AND direction IS NULL AND resumed_at IS NOT NULL "
+        "ORDER BY resumed_at DESC LIMIT ?", (int(limit),))
+    return [dict(r) for r in rows]
 
 
 def halt_stats(days=30):
@@ -734,18 +797,24 @@ def halt_stats(days=30):
     still_open = c.execute("SELECT COUNT(*) n FROM halts WHERE resumed_at IS NULL"
                            ).fetchone()["n"]
     graded = [dict(r) for r in c.execute(
-        "SELECT code, gap_pct, move_15m, move_60m FROM halts "
-        "WHERE graded_at IS NOT NULL AND gap_pct IS NOT NULL AND seen_at > ?",
-        (since,))]
+        "SELECT code, gap_pct, move_15m, move_60m, direction, seq, run_in_pct "
+        "FROM halts WHERE graded_at IS NOT NULL AND gap_pct IS NOT NULL "
+        "AND seen_at > ?", (since,))]
 
     def summarise(rows):
         gaps = sorted(r["gap_pct"] for r in rows)
         if not gaps:
             return None
         follow = [r["move_60m"] for r in rows if r["move_60m"] is not None]
+        follow_sorted = sorted(follow)
         return {
             "n": len(gaps),
             "median_gap": round(gaps[len(gaps) // 2], 2),
+            # Signed, on purpose: bought the reopen, held an hour, this is the
+            # typical result. The unsigned figures above describe volatility;
+            # this one describes a trade.
+            "median_move_60m": (round(follow_sorted[len(follow_sorted) // 2], 2)
+                                if follow_sorted else None),
             "mean_abs_gap": round(sum(abs(g) for g in gaps) / len(gaps), 2),
             "gapped_up_pct": round(100.0 * sum(1 for g in gaps if g > 0) / len(gaps), 1),
             "over_10pct": sum(1 for g in gaps if abs(g) > 10),
@@ -765,8 +834,29 @@ def halt_stats(days=30):
     counts = {r["code"]: r["n"] for r in c.execute(
         "SELECT code, COUNT(*) n FROM halts WHERE seen_at > ? GROUP BY code "
         "ORDER BY n DESC", (since,))}
+
+    # The split a halt trader actually needs. A stock that ripped INTO the
+    # halt and one that cratered into it are different trades, and the first
+    # halt of a runner's day is not its fourth. Pooled, those cancel into a
+    # median gap near zero that describes nothing anyone traded.
+    def seq_bucket(r):
+        q = r.get("seq")
+        if not q:
+            return None
+        return "1" if q == 1 else "2" if q == 2 else "3+"
+    by_direction = {d: summarise([r for r in graded if r["direction"] == d])
+                    for d in ("up", "down")}
+    by_direction_seq = {}
+    for d in ("up", "down"):
+        by_direction_seq[d] = {b: summarise([r for r in graded
+                                             if r["direction"] == d and seq_bucket(r) == b])
+                               for b in ("1", "2", "3+")}
+    unknown_dir = sum(1 for r in graded if r["direction"] not in ("up", "down"))
+
     return {"days": days, "total": total, "open": still_open,
             "overall": summarise(graded), "by_code": by_code,
+            "by_direction": by_direction, "by_direction_seq": by_direction_seq,
+            "direction_unknown": unknown_dir,
             "counts": counts,
             "pending": c.execute(
                 "SELECT COUNT(*) n FROM halts WHERE graded_at IS NULL "

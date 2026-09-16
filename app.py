@@ -208,7 +208,8 @@ def api_halts():
                     limit=int(request.args.get("limit", 120)),
                     symbol=(request.args.get("symbol") or "").strip() or None,
                     code=(request.args.get("code") or "").strip() or None,
-                    open_only=request.args.get("open") == "1"),
+                    open_only=request.args.get("open") == "1",
+                    direction=(request.args.get("direction") or "").strip() or None),
                 "codes": {k: {"label": v[0], "note": v[1], "severity": v[2]}
                           for k, v in halts.CODES.items()},
                 "stats": store.halt_stats(),
@@ -349,6 +350,13 @@ def start_once():
             store.prune_stale_filings(log=log)
         except Exception as e:
             log(f"filing prune skipped: {e}")
+        # Halts stored before they were numbered get their 1st/2nd/3rd-of-the-
+        # day sequence here; it is a handful of queries and it makes the
+        # direction-by-halt-number table honest about history.
+        try:
+            store.resequence_all(log=log)
+        except Exception as e:
+            log(f"halt resequence skipped: {e}")
         news_stream.start(log=log)
         _start_grader()
         # Started last and in its own thread: a slow or unreachable sec.gov
