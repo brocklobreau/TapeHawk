@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapehawk — activist stakes</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230B0D10'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%23FFB020'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg:#0B0D10; --surface:#12161B; --surface-2:#181D24; --line:#232A33;
+    --ink:#E8EAED; --muted:#8B94A0; --faint:#5A626C;
+    --accent:#FFB020; --good:#3FBF5F; --bad:#F04A4A;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+         font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  a { color:inherit; }
+  header { position:sticky; top:0; z-index:20; background:rgba(11,13,16,.94);
+           backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+           padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
+  .brand span { color:var(--accent); }
+  .tabs { display:flex; gap:4px; flex-wrap:wrap; }
+  .tab { font-size:13px; padding:6px 13px; border-radius:7px; text-decoration:none;
+         color:var(--muted); border:1px solid transparent; }
+  .tab:hover { color:var(--ink); }
+  .tab.on { background:var(--surface-2); border-color:var(--line); color:var(--accent);
+            font-weight:600; }
+  .spacer { flex:1; }
+  select { background:var(--surface-2); color:var(--ink); border:1px solid var(--line);
+           border-radius:7px; padding:6px 9px; font-size:13px; }
+
+  .wrap { max-width:1100px; margin:0 auto; padding:18px 16px 40px; }
+  .lede { color:var(--muted); font-size:13.5px; max-width:74ch; margin:0 0 6px; }
+  .lede b { color:var(--ink); }
+  .caveat { color:var(--faint); font-size:12.5px; max-width:74ch; margin:0 0 20px;
+            border-left:2px solid var(--line); padding-left:11px; }
+
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:11px;
+           margin-bottom:16px; }
+  .panel > h2 { margin:0; padding:11px 14px; font-size:12px; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--muted); border-bottom:1px solid var(--line); }
+  .pad { padding:14px; }
+
+  .hero { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .stat { background:var(--surface-2); border:1px solid var(--line); border-radius:9px;
+          padding:12px 13px; }
+  .stat .k { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+             color:var(--faint); }
+  .stat .v { font-family:var(--mono); font-size:25px; font-weight:700; margin-top:3px; }
+  /* The watcher's source is a phrase, not a figure ("daily-index 2026-09-15"),
+     and at 25px it wraps out of its tile. */
+  .stat .v.text { font-size:15px; font-weight:650; word-break:break-word; }
+  .stat .n { font-size:11.5px; color:var(--faint); margin-top:2px; }
+
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+       color:var(--faint); font-weight:600; padding:8px 14px;
+       border-bottom:1px solid var(--line); white-space:nowrap; }
+  td { padding:9px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr:last-child td { border-bottom:0; }
+  td.num { font-family:var(--mono); text-align:right; white-space:nowrap; }
+  .dim { color:var(--faint); } .up { color:var(--good); }
+  .scroll { overflow-x:auto; }
+  .empty { padding:24px 16px; color:var(--muted); line-height:1.65; }
+  .tick { font-family:var(--mono); font-size:12px; font-weight:700; padding:2px 6px;
+          border-radius:4px; background:var(--surface-2); border:1px solid var(--line); }
+  .badge { font-size:10.5px; font-weight:700; padding:2px 6px; border-radius:4px;
+           text-transform:uppercase; white-space:nowrap; display:inline-block; }
+  a:has(> .badge), td a { text-decoration:none; }
+  .badge.new { background:rgba(255,176,32,.16); color:var(--accent); }
+  .badge.amend { background:var(--surface-2); color:var(--muted); }
+  .who { max-width:280px; }
+  .issuer { font-weight:600; }
+  .filters { display:flex; gap:6px; padding:10px 14px; border-bottom:1px solid var(--line);
+             flex-wrap:wrap; }
+  .chip { font-size:12px; padding:5px 11px; border-radius:99px; cursor:pointer;
+          background:var(--surface-2); border:1px solid var(--line); color:var(--muted); }
+  .chip.on { background:var(--accent); color:#1a1205; border-color:var(--accent);
+             font-weight:650; }
+  .warn { margin:0 0 16px; padding:11px 13px; border-radius:9px; font-size:12.5px;
+          background:rgba(240,74,74,.09); border:1px solid rgba(240,74,74,.3);
+          color:var(--ink); }
+  @media (max-width:640px){ .who { max-width:150px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">TAPEHAWK<span>.</span></div>
+  <nav class="tabs">
+    <a class="tab" href="/">Live</a>
+    <a class="tab on" href="/stakes">Stakes</a>
+    <a class="tab" href="/scoreboard">Scoreboard</a>
+  </nav>
+  <div class="spacer"></div>
+</header>
+
+<div class="wrap">
+  <p class="lede">A <b>Schedule 13D</b> means somebody crossed <b>5% of a company</b>
+  and did not claim to be passive about it — they may push for board seats, a sale,
+  or a change of strategy. Since the SEC's 2023 amendments took effect the filing is
+  due within <b>5 business days</b> of crossing the threshold, and amendments within
+  <b>2</b>, so it now describes something current rather than something from a
+  fortnight ago.</p>
+  <p class="caveat">This is a disclosure feed, not a recommendation. A 13D says a
+  large holder showed up; it does not say the stock goes up, and an amendment can
+  just as easily be that holder trimming. Everything here is pulled straight from
+  EDGAR and links back to the filing itself — read the primary document before you
+  act on any row.</p>
+
+  <div id="warn"></div>
+
+  <section class="panel">
+    <h2>The feed</h2>
+    <div class="hero pad" id="hero"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Recent 13D filings</h2>
+    <div class="filters">
+      <button class="chip on" data-mode="">All filings</button>
+      <button class="chip" data-mode="1">New stakes only</button>
+    </div>
+    <div class="scroll" id="tablewrap">
+      <div class="empty">Loading…</div>
+    </div>
+  </section>
+
+  <section class="panel" id="filerspanel" style="display:none">
+    <h2>Most active filers</h2>
+    <div class="scroll" id="filers"></div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var hero=document.getElementById('hero'), tablewrap=document.getElementById('tablewrap'),
+      filersPanel=document.getElementById('filerspanel'), filers=document.getElementById('filers'),
+      warn=document.getElementById('warn');
+  var mode='';
+
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function nnum(v){ return (v==null||isNaN(v))?'—':(+v).toLocaleString(); }
+  function pctOf(v){ return (v==null||isNaN(v))?'—':(+v).toFixed(1)+'%'; }
+  function plural(n,word){ return n+' '+word+(n===1?'':'s'); }
+
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function when(iso){
+    // Date-only stamps are parsed by hand: new Date('2026-09-15') is UTC
+    // midnight and renders as the 14th anywhere west of Greenwich.
+    var s=String(iso||'');
+    var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if(!m) return '—';
+    var label=MON[+m[2]-1]+' '+(+m[3]);
+    var t=/T(\d{2}):(\d{2})/.exec(s);
+    return t ? label+' '+t[1]+':'+t[2] : label;
+  }
+  function latency(ms){
+    if(ms==null||isNaN(ms)) return '';
+    var s=ms/1000;
+    if(s<90) return s.toFixed(1)+'s after EDGAR';
+    return Math.round(s/60)+'m after EDGAR';
+  }
+
+  function render(d){
+    var st=d.stats||{}, w=d.watcher||{}, rows=d.filings||[];
+
+    if(w.user_agent_set===false){
+      warn.innerHTML='<div class="warn"><b>SEC_USER_AGENT is not set.</b> The SEC '+
+        'asks every automated caller to identify itself with a contact address and '+
+        'can refuse requests that do not. Set it in Render to '+
+        '<code>Your Name your@email.com</code> — until then this feed may stay empty.</div>';
+    } else { warn.innerHTML=''; }
+
+    hero.innerHTML =
+      stat('Filings tracked', nnum(st.total),
+           plural(st.initial||0,'new stake')+' · '+plural(st.amendments||0,'amendment'))+
+      stat('Last 30 days', nnum(st.window), 'seen since the watcher started')+
+      stat('Fastest pickup', st.best_latency_ms!=null?(st.best_latency_ms/1000).toFixed(1)+'s':'—',
+           st.avg_latency_ms!=null
+             ? 'average '+(st.avg_latency_ms/1000).toFixed(1)+'s · live arrivals only'
+             : 'measured against EDGAR’s own timestamp, on filings that landed while the watcher was running')+
+      stat('Watcher', w.last_source?esc(w.last_source):'starting…',
+           w.last_poll?('last checked '+when(w.last_poll)):'no poll yet', 'text');
+
+    if(!rows.length){
+      tablewrap.innerHTML='<div class="empty"><b>No 13D filings yet.</b><br>'+
+        'This fills the moment one is disseminated on EDGAR. 13Ds are not an '+
+        'everyday event — a handful a day across the whole market — so an empty '+
+        'table here is normal rather than a sign something is broken.'+
+        (w.last_error?'<br><br><span class="dim">Last watcher error: '+esc(w.last_error)+'</span>':'')+
+        '</div>';
+    } else {
+      tablewrap.innerHTML='<table><thead><tr>'+
+        '<th>Filed</th><th>Company</th><th>Ticker</th><th>Filed by</th>'+
+        '<th style="text-align:right">Stake</th><th style="text-align:right">Shares</th>'+
+        '<th>Type</th></tr></thead><tbody>'+
+        rows.map(function(f){
+          var amend=/\/A$/.test(f.form||'');
+          return '<tr>'+
+            '<td class="num">'+esc(when(f.filed_at||f.seen_at))+
+              '<div class="dim" style="font-size:11px">'+esc(latency(f.latency_ms))+'</div></td>'+
+            '<td><span class="issuer">'+esc(f.issuer_name||'—')+'</span>'+
+              (f.cusip?'<div class="dim" style="font-size:11px">CUSIP '+esc(f.cusip)+'</div>':'')+'</td>'+
+            '<td>'+(f.ticker?'<span class="tick">'+esc(f.ticker)+'</span>':'<span class="dim">—</span>')+'</td>'+
+            '<td class="who">'+esc(f.reporting_person||'—')+'</td>'+
+            '<td class="num">'+pctOf(f.percent)+'</td>'+
+            '<td class="num">'+nnum(f.shares)+'</td>'+
+            '<td>'+(f.url?'<a href="'+esc(f.url)+'" target="_blank" rel="noopener">':'')+
+              '<span class="badge '+(amend?'amend':'new')+'">'+(amend?'Amended':'New stake')+'</span>'+
+              (f.url?'</a>':'')+'</td>'+
+          '</tr>';
+        }).join('')+'</tbody></table>';
+    }
+
+    var top=st.top_filers||[];
+    if(top.length){
+      filersPanel.style.display='';
+      filers.innerHTML='<table><thead><tr><th>Filer</th>'+
+        '<th style="text-align:right">13Ds filed</th></tr></thead><tbody>'+
+        top.map(function(r){ return '<tr><td>'+esc(r.p)+'</td><td class="num">'+r.n+'</td></tr>'; })
+        .join('')+'</tbody></table>';
+    } else { filersPanel.style.display='none'; }
+  }
+
+  function stat(k,v,n,cls){
+    return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v '+(cls||'')+'">'+v+
+           '</div><div class="n">'+n+'</div></div>';
+  }
+
+  function load(){
+    fetch('/api/stakes'+(mode?'?initial_only=1':''))
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.error){ tablewrap.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
+        render(d);
+      })
+      .catch(function(){ tablewrap.innerHTML='<div class="empty">Could not load filings.</div>'; });
+  }
+
+  [].forEach.call(document.querySelectorAll('.chip'), function(c){
+    c.onclick=function(){
+      mode=c.getAttribute('data-mode');
+      [].forEach.call(document.querySelectorAll('.chip'), function(x){ x.classList.remove('on'); });
+      c.classList.add('on');
+      load();
+    };
+  });
+
+  load();
+  // 13Ds trickle rather than stream, so a slow refresh is the honest cadence.
+  setInterval(load, 120000);
+})();
+</script>
+</body>
+</html>

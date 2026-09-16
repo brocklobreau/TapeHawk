@@ -62,11 +62,38 @@ CREATE TABLE IF NOT EXISTS headlines (
 );
 """
 
+# Filings live in their own table rather than as rows in `headlines`. They are
+# a different kind of object -- no wire latency, no category keywords, a
+# percentage and a reporting person instead -- and squeezing them into the
+# headline schema would mean half the columns null on every row and a feed
+# query that has to know which sort it is looking at.
+FILINGS_SQL = """
+CREATE TABLE IF NOT EXISTS filings (
+  id               INTEGER PRIMARY KEY,
+  accession        TEXT UNIQUE,
+  form             TEXT NOT NULL,
+  issuer_cik       INTEGER,
+  issuer_name      TEXT,
+  ticker           TEXT,
+  reporting_person TEXT,
+  percent          REAL,
+  shares           REAL,
+  cusip            TEXT,
+  filed_at         TEXT,
+  seen_at          TEXT NOT NULL,
+  latency_ms       INTEGER,
+  url              TEXT,
+  source           TEXT
+);
+"""
+
 INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_created ON headlines(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_noise_created ON headlines(is_noise, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_importance ON headlines(importance DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_ungraded ON headlines(graded_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_filings_seen ON filings(seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_filings_ticker ON filings(ticker, seen_at DESC);
 """
 
 
@@ -82,6 +109,7 @@ def _conn():
         c.execute("PRAGMA journal_mode=WAL")
         c.execute("PRAGMA synchronous=NORMAL")
         c.executescript(TABLE_SQL)
+        c.executescript(FILINGS_SQL)
         # Additive migration. CREATE TABLE IF NOT EXISTS does nothing to a
         # table that already exists, so a database created before these
         # columns existed would never gain them and every insert would fail.
@@ -339,6 +367,72 @@ def scoreboard(days=30):
             "recent_big": recent_big,
             "by_impact": by_impact, "by_tone": by_tone, "by_category": by_cat,
             "recent": recent, "pending": pending, "ungradeable": skipped}
+
+
+# --- 13D filings ------------------------------------------------------------
+
+def filing_exists(accession):
+    if not accession:
+        return False
+    return _conn().execute("SELECT 1 FROM filings WHERE accession = ?",
+                           (accession,)).fetchone() is not None
+
+
+def insert_filing(f):
+    """True if stored, False if already seen.
+
+    EDGAR re-lists a filing across consecutive polls, and an amendment carries
+    its own accession number, so INSERT OR IGNORE on the accession is what
+    keeps the tab from filling with the same stake over and over.
+    """
+    c = _conn()
+    cur = c.execute(
+        """INSERT OR IGNORE INTO filings
+           (accession, form, issuer_cik, issuer_name, ticker, reporting_person,
+            percent, shares, cusip, filed_at, seen_at, latency_ms, url, source)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (f.get("accession"), f.get("form", "SC 13D"), f.get("issuer_cik"),
+         f.get("issuer_name"), f.get("ticker"), f.get("reporting_person"),
+         f.get("percent"), f.get("shares"), f.get("cusip"), f.get("filed_at"),
+         f.get("seen_at") or datetime.now(timezone.utc).isoformat(),
+         f.get("latency_ms"), f.get("url"), f.get("source")))
+    c.commit()
+    return cur.rowcount > 0
+
+
+def recent_filings(limit=100, ticker=None, amendments=True):
+    sql = "SELECT * FROM filings WHERE 1=1"
+    args = []
+    if ticker:
+        sql += " AND ticker = ?"
+        args.append(ticker.upper())
+    if not amendments:
+        # An initial 13D is a new position. An amendment can be a holder
+        # trimming, which is the opposite news, so they are separable.
+        sql += " AND form NOT LIKE '%/A'"
+    sql += " ORDER BY COALESCE(filed_at, seen_at) DESC, id DESC LIMIT ?"
+    args.append(min(int(limit), 300))
+    return [dict(r) for r in _conn().execute(sql, args)]
+
+
+def filing_stats(days=30):
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    c = _conn()
+    total = c.execute("SELECT COUNT(*) n FROM filings").fetchone()["n"]
+    window = c.execute("SELECT COUNT(*) n FROM filings WHERE seen_at > ?",
+                       (since,)).fetchone()["n"]
+    fresh = c.execute("SELECT COUNT(*) n FROM filings WHERE form NOT LIKE '%/A'"
+                      ).fetchone()["n"]
+    lat = c.execute("SELECT AVG(latency_ms) a, MIN(latency_ms) m FROM filings "
+                    "WHERE latency_ms IS NOT NULL").fetchone()
+    top = [dict(r) for r in c.execute(
+        "SELECT reporting_person p, COUNT(*) n FROM filings "
+        "WHERE reporting_person IS NOT NULL AND reporting_person != '' "
+        "GROUP BY p ORDER BY n DESC, p ASC LIMIT 8")]
+    return {"total": total, "window": window, "days": days,
+            "initial": fresh, "amendments": total - fresh,
+            "avg_latency_ms": round(lat["a"]) if lat["a"] else None,
+            "best_latency_ms": lat["m"], "top_filers": top}
 
 
 def prune(keep_days=45):

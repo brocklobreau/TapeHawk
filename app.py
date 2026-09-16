@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from flask import Flask, Response, request, send_from_directory
 
 import earnings
+import filings
 import news_stream
 import outcomes
 import research
@@ -180,6 +181,25 @@ def api_earnings():
         return {"error": "Earnings history unavailable right now."}, 502
 
 
+@app.route("/stakes")
+def stakes_page():
+    return send_from_directory(HERE, "stakes.html")
+
+
+@app.route("/api/stakes")
+def api_stakes():
+    try:
+        return {"filings": store.recent_filings(
+                    limit=int(request.args.get("limit", 100)),
+                    ticker=(request.args.get("ticker") or "").strip() or None,
+                    amendments=request.args.get("initial_only") != "1"),
+                "stats": store.filing_stats(),
+                "watcher": filings.status()}
+    except Exception as e:
+        log(f"stakes failed: {e}")
+        return {"error": "Could not read the filings."}, 500
+
+
 @app.route("/scoreboard")
 def scoreboard_page():
     return send_from_directory(HERE, "scoreboard.html")
@@ -260,6 +280,12 @@ def start_once():
             log(f"importance backfill skipped: {e}")
         news_stream.start(log=log)
         _start_grader()
+        # Started last and in its own thread: a slow or unreachable sec.gov
+        # must not delay the headline socket coming up.
+        try:
+            filings.start(store, log=log)
+        except Exception as e:
+            log(f"filings watcher failed to start (non-fatal): {e}")
         log("tapehawk: started")
 
 
