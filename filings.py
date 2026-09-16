@@ -804,23 +804,61 @@ def _shape(text):
     return f"{len(text)} bytes, {text.count(chr(10)) + 1} lines"
 
 
+_index_diag = {}
+
+
+def _index_columns(header):
+    """Column start offsets from the header row itself.
+
+    The daily index is fixed-width. Its header names the columns, so their
+    positions can be read from the file rather than assumed -- an assumed
+    offset fails silently by reading the wrong field the day the layout
+    shifts, and a company name long enough to fill its column leaves a single
+    space before the CIK, which defeats any whitespace-based split.
+    """
+    names = ["Form Type", "Company Name", "CIK", "Date Filed", "File Name"]
+    pos = []
+    for n in names:
+        i = header.find(n)
+        if i < 0:
+            return None
+        pos.append(i)
+    if pos != sorted(pos):
+        return None
+    return pos
+
+
 def parse_daily_index(text, want="SC 13D"):
-    _last_body[0] = text or ""
-    """The published daily index is fixed-width text with a header block. Its
+    """The published daily index: fixed-width text with a header block. Its
     columns are Form Type | Company Name | CIK | Date Filed | File Name.
 
-    Parsed by splitting on runs of two or more spaces rather than by byte
-    offset: the column positions have shifted before, and a parser pinned to
-    them fails silently by reading the wrong field rather than loudly.
+    Sliced by the offsets the header row declares. Falls back to splitting on
+    runs of spaces only when no header can be found, and records what it saw
+    either way so the poll log can say WHICH form types were in the file when
+    the wanted one was not.
     """
+    _last_body[0] = text or ""
     out = []
-    for line in text.splitlines():
+    cols = None
+    seen_forms = {}
+    unparsed = 0
+    for line in (text or "").splitlines():
+        if cols is None and "Form Type" in line and "File Name" in line:
+            cols = _index_columns(line)
+            continue
         if not line.strip() or line.startswith("-") or "edgar/data/" not in line:
             continue
-        parts = [p.strip() for p in re.split(r"\s{2,}", line.strip()) if p.strip()]
-        if len(parts) < 5:
+        if cols:
+            a, b, c, d, e = cols
+            parts = [line[a:b].strip(), line[b:c].strip(), line[c:d].strip(),
+                     line[d:e].strip(), line[e:].strip()]
+        else:
+            parts = [p.strip() for p in re.split(r"\s{2,}", line.strip()) if p.strip()]
+        if len(parts) < 5 or not parts[0]:
+            unparsed += 1
             continue
         form, name, cik, filed, path = parts[0], parts[1], parts[2], parts[3], parts[-1]
+        seen_forms[form.upper()] = seen_forms.get(form.upper(), 0) + 1
         if not _is_form(form, want):
             continue
         acc = _ACC_IN_URL.search(path)
@@ -829,7 +867,8 @@ def parse_daily_index(text, want="SC 13D"):
             "form": form.upper(),
             "issuer_cik": int(cik) if cik.isdigit() else None,
             "issuer_name": name or None,
-            "filed_at": filed or None,
+            "filed_at": (f"{filed[:4]}-{filed[4:6]}-{filed[6:8]}"
+                         if re.fullmatch(r"\d{8}", filed) else filed or None),
             "url": "https://www.sec.gov/Archives/" + path.lstrip("/"),
             "source": "daily-index",
             "items": [],            # the index carries no item codes
@@ -839,6 +878,10 @@ def parse_daily_index(text, want="SC 13D"):
             # is more useful than a blank on the fallback path.
             "issuer_confirmed": True,
         })
+    top = sorted(seen_forms.items(), key=lambda kv: -kv[1])[:6]
+    _index_diag.update(header_found=cols is not None, rows=sum(seen_forms.values()),
+                       unparsed=unparsed, top=top,
+                       has_want=any(_is_form(k, want) for k in seen_forms))
     return [f for f in out if f["accession"]]
 
 
@@ -995,6 +1038,7 @@ def collect(want="SC 13D", subject_only=True, log=print):
             days.append(d)
         probe += 1
     for day in days:
+        stale = 0
         try:
             rows = parse_daily_index(_get(_index_url_for(day)), want=want)
             rows, stale = drop_stale(rows)
@@ -1006,8 +1050,15 @@ def collect(want="SC 13D", subject_only=True, log=print):
             # Say what came back. sec.gov answers a missing index file with a
             # 200 and an HTML page, which is indistinguishable from a real but
             # empty index unless the content is described.
-            errors.append(f"index {day}: fetched {_shape(_last_body[0])}, "
-                          f"0 {want} rows")
+            d = _index_diag
+            top = ", ".join(f"{k} x{n}" for k, n in d.get("top", []))
+            errors.append(
+                f"index {day}: fetched {_shape(_last_body[0])}, "
+                f"{d.get('rows', 0)} rows parsed"
+                + ("" if d.get("header_found") else " (NO header row found)")
+                + (f", {d['unparsed']} unparseable" if d.get("unparsed") else "")
+                + (f", top forms: {top}" if top else "")
+                + (f", {stale} {want} too old" if stale else f", 0 {want} rows"))
     _status["last_error"] = " | ".join(errors[:4]) or None
     # Every attempt, not just the first. The first version logged errors[0]
     # only, so a live failure showed one line about the Atom feed and said

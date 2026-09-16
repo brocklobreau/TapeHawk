@@ -132,9 +132,38 @@ def _num(v):
     return None if f != f else f
 
 
+def _describe(r):
+    """What the feed actually sent, for the log. A parse error alone says
+    nothing; this is what turns "invalid token, column 1" into a diagnosis."""
+    body = r.content[:240] if isinstance(r.content, bytes) else b""
+    head = body.decode("utf-8", "replace").replace("\n", " ").replace("\r", " ")
+    kind = ("an HTML page" if b"<html" in body.lower() or b"<!doctype" in body.lower()
+            else "an empty body" if not body else f"{len(r.content)} bytes")
+    return (f"HTTP {r.status_code}, {r.headers.get('Content-Type', 'no content-type')}, "
+            f"{kind}; starts: {head[:120]!r}")
+
+
 def parse_feed(xml_text):
-    """Halt rows out of the Nasdaq RSS document, newest first."""
+    """Halt rows out of the Nasdaq RSS document, newest first.
+
+    Takes bytes or text. Bytes are preferred by the caller: this feed is
+    served by ASP.NET, which writes a UTF-8 byte-order mark before the
+    document, and a BOM at the start of a *string* is an invalid token to the
+    XML parser -- the exact failure the feed produced on every poll for its
+    first day in production. Given bytes, the parser reads the BOM as an
+    encoding hint, which is what it is. A text BOM is stripped as well so
+    neither path can fail on it.
+    """
+    if isinstance(xml_text, bytes):
+        xml_text = xml_text.lstrip(b"\xef\xbb\xbf").lstrip()
+    else:
+        xml_text = xml_text.lstrip("\ufeff").lstrip()
     root = ET.fromstring(xml_text)
+    # A challenge page is often well-formed XML -- "<html>...</html>" parses
+    # cleanly and contains no <item>, which would read as "no halts today"
+    # and be believed. Only an RSS document counts.
+    if root.tag.lower() != "rss":
+        raise ValueError(f"not an RSS document (root element is <{root.tag}>)")
     out = []
     for item in root.iter("item"):
         symbol = _text(item, "ndaq:IssueSymbol").upper()
@@ -171,12 +200,21 @@ def parse_feed(xml_text):
 def poll_once(store, log=print):
     try:
         r = requests.get(FEED_URL, timeout=TIMEOUT, headers={
-            "User-Agent": os.environ.get("SEC_USER_AGENT", "").strip()
-                          or "Tapehawk/1.0",
-            "Accept": "application/rss+xml, application/xml, text/xml, */*"})
+            # A plain browser-style UA. The SEC's "name and email" convention
+            # is the SEC's; Nasdaq's edge does not want it and an unusual UA
+            # is the commonest reason a CDN serves a challenge page instead.
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/128.0 Safari/537.36 Tapehawk/1.0",
+            "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.5",
+            "Accept-Language": "en-US,en;q=0.8"})
         if r.status_code >= 400:
-            raise RuntimeError(f"{r.status_code} from the halt feed")
-        rows = parse_feed(r.text)
+            raise RuntimeError(f"{r.status_code} from the halt feed -- {_describe(r)}")
+        try:
+            rows = parse_feed(r.content)
+        except (ET.ParseError, ValueError) as e:
+            # Say what came back. Without this the log reads "invalid token"
+            # forever and nobody can tell a BOM from a bot-block page.
+            raise RuntimeError(f"could not parse the feed ({e}) -- {_describe(r)}")
     except Exception as e:
         _status["last_error"] = str(e)
         log(f"halts: feed unavailable (non-fatal) -- {e}")
