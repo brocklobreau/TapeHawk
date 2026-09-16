@@ -143,14 +143,30 @@ def _throttle():
         _last_request[0] = time.time()
 
 
-def _get(url, as_json=False, max_bytes=None):
+def _describe(resp):
+    """A refusal with its reason attached.
+
+    sec.gov answers a blocked request with a 403 whose BODY says why -- an
+    undeclared user agent, or a rate threshold. Without the body all three
+    look identical in the logs, which is exactly the hole that made the first
+    live failure unreadable.
+    """
+    try:
+        body = " ".join((resp.text or "")[:400].split())
+    except Exception:
+        body = ""
+    return f"{resp.status_code} for {resp.url}" + (f" -- said: {body}" if body else "")
+
+
+def _get(url, as_json=False, max_bytes=None, _retry=True):
     _throttle()
     if max_bytes:
         # Streamed and truncated: an 8-K with a fifty-page exhibit would
         # otherwise be pulled in full to read its first two paragraphs.
         with requests.get(url, timeout=TIMEOUT, stream=True, headers={
                 "User-Agent": user_agent()}) as r:
-            r.raise_for_status()
+            if r.status_code >= 400:
+                raise SecError(_describe(r))
             buf = b""
             for chunk in r.iter_content(16384):
                 buf += chunk
@@ -160,8 +176,18 @@ def _get(url, as_json=False, max_bytes=None):
     r = requests.get(url, timeout=TIMEOUT, headers={
         "User-Agent": user_agent(),
         "Accept-Encoding": "gzip, deflate",
+        # sec.gov is stricter about Archives paths than about /files. Sending
+        # a browser-shaped Accept costs nothing and removes one variable.
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     })
-    r.raise_for_status()
+    if r.status_code in (403, 429) and _retry:
+        # Observed in production: a burst of Archives requests draws a 403
+        # while the same URL succeeds moments later. One backed-off retry
+        # turns an intermittent refusal into a non-event.
+        time.sleep(2.0)
+        return _get(url, as_json=as_json, max_bytes=max_bytes, _retry=False)
+    if r.status_code >= 400:
+        raise SecError(_describe(r))
     return r.json() if as_json else r.text
 
 
@@ -606,8 +632,17 @@ def collect(want="SC 13D", subject_only=True, log=print):
         errors.append(f"atom: {e}")
 
     today = datetime.now(timezone.utc).date()
-    for back in range(0, 5):            # weekends and holidays have no index
-        day = today - timedelta(days=back)
+    # Weekdays only, and at most three of them. EDGAR publishes no daily index
+    # for a Saturday or Sunday, so requesting one is a guaranteed miss that
+    # still counts against the burst -- and a burst of Archives requests is
+    # what drew 403s in production while the same URLs worked moments later.
+    days, probe = [], 0
+    while len(days) < 3 and probe < 7:
+        d = today - timedelta(days=probe)
+        if d.weekday() < 5:
+            days.append(d)
+        probe += 1
+    for day in days:
         try:
             rows = parse_daily_index(_get(_index_url_for(day)), want=want)
             if rows:
