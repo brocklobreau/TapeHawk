@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from flask import Flask, Response, request, send_from_directory
+from flask import Flask, Response, redirect, request, send_from_directory
 
 import earnings
 import filings
@@ -40,6 +40,20 @@ def log(msg):
 # --- gzip: the page and the feed JSON both compress ~8x for ~4ms ------------
 COMPRESSIBLE = ("text/html", "text/css", "application/javascript",
                 "application/json", "image/svg+xml", "text/plain")
+
+
+@app.after_request
+def _no_stale_html(response):
+    """Pages must revalidate; a cached page means a cached NAV BAR.
+
+    Renaming /stakes to /filings left browsers following a link that no longer
+    existed, from a home page they never re-requested. The JSON endpoints get
+    the same treatment: a feed served from cache is a feed that stopped being
+    live, which is the one thing this site cannot be.
+    """
+    if response.mimetype in ("text/html", "application/json"):
+        response.headers.setdefault("Cache-Control", "no-cache, must-revalidate")
+    return response
 
 
 @app.after_request
@@ -184,6 +198,18 @@ def api_earnings():
 @app.route("/filings")
 def filings_page():
     return send_from_directory(HERE, "filings.html")
+
+
+@app.route("/stakes")
+def stakes_moved():
+    """This page was called /stakes before it covered 8-Ks as well.
+
+    Kept as a redirect rather than deleted: a browser holding the old page in
+    cache, an open tab from before the rename, or anyone who bookmarked it
+    follows a dead link otherwise -- and a 404 on a tab that exists is the
+    most confusing possible failure. Renamed routes should outlive the rename.
+    """
+    return redirect("/filings", code=302)
 
 
 @app.route("/api/filings")
