@@ -348,6 +348,21 @@ def mark_graded(article_id, symbol, move_15m, move_60m, entry, reason=None):
     c.commit()
 
 
+# A move smaller than this is not a reaction, it is the spread wobbling.
+# Direction calls are not scored against it: handing the site credit because a
+# stock drifted +0.03% after a headline would make the hit rate a measurement
+# of rounding noise. These rows are reported on their own line instead.
+FLAT_BAND_PCT = 0.25
+
+
+def _median(xs):
+    s = sorted(xs)
+    n = len(s)
+    if not n:
+        return None
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+
 def scoreboard(days=30):
     """How well the calls held up, straight from the graded rows.
 
@@ -370,15 +385,47 @@ def scoreboard(days=30):
         if not rs:
             return None
         moves = [abs(r["move_60m"]) for r in rs]
-        moves.sort()
         signed = [r["move_60m"] for r in rs]
+
+        # "Went up" cannot be the measure of a call, and using it as one was a
+        # real error on this page. A negative headline followed by a fall is a
+        # CORRECT call that scores zero on "went up", so any pool holding both
+        # tones averages two numbers that pull in opposite directions: a site
+        # that called every headline perfectly would still land near 50% if
+        # its headlines split evenly between good news and bad. What is scored
+        # here instead is AGREEMENT -- did the stock move the way the tone
+        # said it would. Now 50% means a coin flip everywhere on the page and
+        # 100% means perfect, which is what a reader assumes a hit rate means.
+        #
+        # Headlines with no directional call are not scored at all rather than
+        # counted as failures, and neither are the ones that barely moved.
+        right = wrong = flat = 0
+        for r in rs:
+            tone, m = r["tone"], r["move_60m"]
+            if tone not in ("positive", "negative"):
+                continue
+            if abs(m) < FLAT_BAND_PCT:
+                flat += 1
+            elif (m > 0) == (tone == "positive"):
+                right += 1
+            else:
+                wrong += 1
+        scored = right + wrong
         return {
             "n": len(rs),
-            "median_abs_move": round(moves[len(moves) // 2], 2),
+            "median_abs_move": round(_median(moves), 2),
             "mean_abs_move": round(sum(moves) / len(moves), 2),
             "moved_over_2pct": round(100.0 * sum(1 for m in moves if m >= 2) / len(moves), 1),
             "mean_signed": round(sum(signed) / len(signed), 3),
+            # The blunt version of the same test, and the one that is hardest
+            # to fool: bad news should carry a clearly NEGATIVE median. A tone
+            # label that only sorts language will leave both near zero.
+            "median_signed": round(_median(signed), 2),
             "pct_up": round(100.0 * sum(1 for m in signed if m > 0) / len(signed), 1),
+            "pct_correct": round(100.0 * right / scored, 1) if scored else None,
+            "scored": scored,
+            "no_reaction": flat,
+            "no_call": len(rs) - scored - flat,
         }
 
     by_impact = {}
@@ -415,7 +462,8 @@ def scoreboard(days=30):
                         "WHERE graded_at IS NULL AND is_noise = 0").fetchone()["n"]
     skipped = c.execute("SELECT COUNT(*) n FROM headlines "
                         "WHERE graded_at IS NOT NULL AND move_60m IS NULL").fetchone()["n"]
-    return {"days": days, "overall": summarise(all_rows), "big_news": summarise(big),
+    return {"days": days, "flat_band": FLAT_BAND_PCT,
+            "overall": summarise(all_rows), "big_news": summarise(big),
             "recent_big": recent_big,
             "by_impact": by_impact, "by_tone": by_tone, "by_category": by_cat,
             "recent": recent, "pending": pending, "ungradeable": skipped}

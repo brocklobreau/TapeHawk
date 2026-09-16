@@ -59,7 +59,24 @@
   td.num { font-family:var(--mono); text-align:right; }
   .up { color:var(--good); } .down { color:var(--bad); } .dim { color:var(--faint); }
   .thin { color:var(--faint); font-style:italic; }
-  .scroll { overflow-x:auto; }
+  /* The breakdown tables are wider than a phone once the tone table carries
+     its two extra columns. Same trap as the vertical lists: Chrome's overlay
+     scrollbar has zero layout width and only appears while you are scrolling,
+     so without a fade on the right edge a reader simply never learns that
+     "Median signed" -- the column that shows bad news falling -- exists. */
+  .scroll { position:relative; overflow-x:auto; overscroll-behavior-x:contain;
+            scrollbar-width:thin; scrollbar-color:rgba(255,176,32,.45) transparent; }
+  .scroll::-webkit-scrollbar { height:9px; }
+  .scroll::-webkit-scrollbar-track { background:transparent; }
+  .scroll::-webkit-scrollbar-thumb { background:rgba(255,176,32,.38);
+    border-radius:99px; border:2px solid var(--surface); }
+  .hwrap { position:relative; }
+  .hwrap::after { content:''; position:absolute; top:0; bottom:0; right:0;
+    width:34px; pointer-events:none; opacity:0; transition:opacity .18s;
+    background:linear-gradient(to right, rgba(18,22,27,0), var(--surface));
+    border-radius:0 11px 11px 0; }
+  .hwrap.more::after { opacity:1; }
+  @media (prefers-reduced-motion:reduce){ .hwrap::after { transition:none; } }
 
   /* A graded list runs to twenty-five or forty rows. Capped and scrolled so
      the page stays navigable, with the column headers PINNED -- a table you
@@ -149,40 +166,79 @@
   // inline rather than letting a 100% on n=3 look like a track record.
   function thin(n){ return n<10 ? ' <span class="thin">(too few to trust)</span>' : ''; }
 
+  // Set from the payload so the page never states a threshold the server is
+  // not actually using.
+  var BAND = 0.25;
+
   function statRow(s){
     if(!s) return '<div class="empty">Nothing graded in this window yet.</div>';
+    // Bad news that falls is a CORRECT call. Scoring it on "went up" marked it
+    // wrong, so the two tones cancelled and the headline number drifted toward
+    // 50% no matter how well the calls did. This tile scores each headline
+    // against its own tone instead.
+    var acc = '<div class="stat"><div class="k">Called it right</div><div class="v">'+
+      pc(s.pct_correct,0)+'</div><div class="n">'+
+      (s.pct_correct==null ? 'no directional calls to score yet'
+        : s.scored+' directional call'+(s.scored===1?'':'s')+' · 50% = a coin flip')+
+      '</div></div>';
+    var excluded = '';
+    if(s.no_reaction || s.no_call){
+      var bits=[];
+      if(s.no_reaction) bits.push('<b>'+s.no_reaction+'</b> moved less than '+
+        BAND+'% either way, which is not a reaction to score');
+      if(s.no_call) bits.push('<b>'+s.no_call+'</b> carried no directional call');
+      excluded = '<p class="caveat" style="margin:10px 0 0">Of '+s.n+' graded, '+
+        bits.join(' and ')+'. Neither counts for or against the hit rate — '+
+        'inflating the denominator with headlines that made no claim would '+
+        'drag every score toward 50%.</p>';
+    }
     return '<div class="hero">'+
       '<div class="stat"><div class="k">Median move</div><div class="v">'+pc(s.median_abs_move)+
         '</div><div class="n">in the hour after, absolute</div></div>'+
       '<div class="stat"><div class="k">Moved over 2%</div><div class="v">'+pc(s.moved_over_2pct,0)+
         '</div><div class="n">share of headlines</div></div>'+
-      '<div class="stat"><div class="k">Went up</div><div class="v">'+pc(s.pct_up,0)+
-        '</div><div class="n">50% = a coin flip</div></div>'+
+      acc+
       '<div class="stat"><div class="k">Sample</div><div class="v">'+s.n+
         '</div><div class="n">headlines graded</div></div>'+
-    '</div>';
+    '</div>'+excluded;
   }
 
-  function breakdown(title, obj, labelMap, note){
+  // showTone adds the two columns that only make sense when the rows ARE the
+  // tones: which way each group actually went, and how far. Everywhere else
+  // those columns would be a blend of good and bad news and mean nothing.
+  function breakdown(title, obj, labelMap, note, showTone){
     var keys=Object.keys(obj||{}).filter(function(k){return obj[k];});
     if(!keys.length) return '';
     var rows=keys.map(function(k){
       var s=obj[k];
+      var extra = showTone
+        ? '<td class="num">'+pc(s.pct_up,0)+'</td>'+
+          '<td class="num">'+signed(s.median_signed)+'</td>'
+        : '';
+      // n scored sits beside the hit rate, not the row count: they differ
+      // whenever a headline made no call, and a rate shown without its own
+      // denominator is the thing this page exists to avoid.
+      var hit = s.pct_correct==null
+        ? '<span class="dim">no call</span>'
+        : pc(s.pct_correct,0)+' <span class="dim">/'+s.scored+'</span>';
       return '<tr><td>'+esc((labelMap&&labelMap[k])||k)+thin(s.n)+'</td>'+
         '<td class="num">'+s.n+'</td>'+
         '<td class="num">'+pc(s.median_abs_move)+'</td>'+
         '<td class="num">'+pc(s.moved_over_2pct,0)+'</td>'+
-        '<td class="num">'+pc(s.pct_up,0)+'</td></tr>';
+        extra+
+        '<td class="num">'+hit+'</td></tr>';
     }).join('');
     return '<section class="panel"><h2>'+esc(title)+'</h2>'+
       (note?'<div class="pad" style="padding-bottom:0"><p class="caveat" style="margin:0 0 6px">'+note+'</p></div>':'')+
-      '<div class="scroll"><table><thead><tr><th>'+esc(title)+'</th><th class="num">N</th>'+
+      '<div class="hwrap"><div class="scroll"><table><thead><tr><th>'+esc(title)+'</th><th class="num">N</th>'+
       '<th class="num">Median move</th><th class="num">Over 2%</th>'+
-      '<th class="num">Went up</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>';
+      (showTone?'<th class="num">Went up</th><th class="num">Median signed</th>':'')+
+      '<th class="num">Called right</th></tr></thead><tbody>'+rows+'</tbody></table></div></div></section>';
   }
 
   function render(d){
     if(d.error){ body.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
+    if(d.flat_band!=null) BAND=d.flat_band;
     var parts=[];
     // Big News first: it is the claim the site makes. Everything else follows
     // as the control -- "big news moved 7%" is not a finding until you know
@@ -220,9 +276,16 @@
     parts.push(breakdown('Direction call', d.by_tone,
       {positive:'Read as positive', negative:'Read as negative',
        unclear:'Direction unclear'},
-      'The column that matters here is "Went up". Positive headlines should sit '+
-      'above 50% and negative below. If both hover at 50, the tone labels are '+
-      'describing language rather than outcomes.'));
+      'This is the one table where "Went up" belongs, because here the rows '+
+      '<i>are</i> the two directions and you can read them against each other. '+
+      'Positive headlines should sit well above 50% and negative well below — '+
+      'a negative headline that is followed by a fall is a correct call, and it '+
+      'scores as one in the "Called right" column. <b>Median signed</b> is the '+
+      'harder test: it should be clearly positive on the top row and clearly '+
+      '<i>negative</i> on the middle one. If both sit near zero while the median '+
+      'move stays large, the tone labels are sorting language rather than '+
+      'outcomes — the stocks are moving, just not the way the label said.',
+      true));
 
     parts.push(breakdown('Category', d.by_category, null));
 
@@ -271,6 +334,16 @@
   }
 
   function markScrollables(){
+    [].forEach.call(document.querySelectorAll('.scroll'), function(el){
+      var wrap=el.parentNode;
+      if(!wrap || !wrap.classList.contains('hwrap')) return;
+      wrap.classList.toggle('more',
+        el.scrollWidth - el.clientWidth - el.scrollLeft > 8);
+      if(!el.getAttribute('data-bound')){
+        el.setAttribute('data-bound', '1');
+        el.addEventListener('scroll', markScrollables, {passive:true});
+      }
+    });
     [].forEach.call(document.querySelectorAll('.vscroll'), function(el){
       var wrap=el.parentNode;
       if(!wrap || !wrap.classList.contains('vwrap')) return;
