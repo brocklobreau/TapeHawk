@@ -90,6 +90,13 @@
   .dir.down { background:rgba(240,74,74,.14); color:var(--bad); }
   .dir.flat, .dir.unknown { background:var(--surface-2); color:var(--faint); }
   .seq { font-family:var(--mono); font-size:11px; color:var(--muted); margin-left:5px; white-space:nowrap; }
+  /* Float: the number that decides how far a chain can run, sized like a
+     price so it reads at a glance, with the tier carried as colour. */
+  .fl { font-family:var(--mono); font-size:12.5px; font-weight:700; white-space:nowrap; }
+  .fl.micro { color:#FF6B6B; } .fl.low { color:var(--accent); }
+  .fl.mid { color:var(--ink); } .fl.large { color:var(--muted); font-weight:500; }
+  .fl .sub { display:block; font-family:var(--sans); font-size:10.5px; font-weight:500;
+             color:var(--faint); }
   #dirrate td:first-child { white-space:nowrap; }
   .seq.hot { color:var(--accent); font-weight:700; }
   tr.total td { background:var(--surface-2); }
@@ -328,8 +335,30 @@
     dirrate.innerHTML=html;
   }
 
+  var FLOATS={};
+  function shares(v){
+    if(v==null||isNaN(v)) return '—';
+    var n=+v;
+    if(n>=1e9) return (n/1e9).toFixed(2)+'B';
+    if(n>=1e6) return (n/1e6).toFixed(n<10e6?2:1)+'M';
+    if(n>=1e3) return (n/1e3).toFixed(0)+'K';
+    return String(Math.round(n));
+  }
+  // Outstanding is shown when float is unknown, but LABELLED: it is an upper
+  // bound on float, and passing it off as the float would make a 4M-float
+  // name with 30M outstanding look like it cannot run.
+  function floatCell(f){
+    if(!f) return '<span class="dim" title="Looked up a few per minute for today\'s halts">…</span>';
+    var v=f.is_float?f.float_shares:f.outstanding;
+    return '<span class="fl '+esc(f.tier||'')+'" title="'+esc(f.tier_note||'')+'">'+shares(v)+
+      '<span class="sub">'+(f.is_float?'float':'outstanding')+'</span></span>';
+  }
   function render(d){
     var st=d.stats||{}, w=d.watcher||{}, rows=d.halts||[];
+    // Merge, never replace: a float the reader just looked up by hand must
+    // not vanish when the next poll arrives without it.
+    var fl=d.floats||{};
+    Object.keys(fl).forEach(function(k){ FLOATS[k]=fl[k]; });
     renderDirection(st);
     CODES=d.codes||CODES;
     CODE_ORDER=d.code_order||CODE_ORDER;
@@ -374,7 +403,7 @@
     }
 
     tablewrap.innerHTML='<table><thead><tr>'+
-      '<th>Halted</th><th>Symbol</th><th>Code</th><th>What it means</th>'+
+      '<th>Halted</th><th>Symbol</th><th class="num">Float</th><th>Code</th><th>What it means</th>'+
       '<th>Resumed</th><th class="num">Band</th><th class="num">Gap</th>'+
       '<th class="num">+15m</th><th class="num">+60m</th>'+
       '</tr></thead><tbody>'+
@@ -387,6 +416,7 @@
             (h.name?'<div class="dim" style="font-size:11px;max-width:16ch;overflow:hidden;'+
               'text-overflow:ellipsis;white-space:nowrap">'+esc(h.name)+'</div>':'')+
             dirTag(h)+'</td>'+
+          '<td class="num">'+floatCell(FLOATS[h.symbol])+'</td>'+
           '<td><span class="code '+sev(h.code)+'">'+esc(h.code||'?')+'</span></td>'+
           '<td class="meaning"><b>'+esc(label(h.code))+'</b>'+
             '<span>'+esc(note(h.code))+'</span></td>'+

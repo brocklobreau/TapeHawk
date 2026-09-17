@@ -24,6 +24,7 @@ from flask import Flask, Response, redirect, request, send_from_directory
 
 import earnings
 import filings
+import floats
 import halts
 import news_stream
 import outcomes
@@ -168,6 +169,7 @@ def api_lookup():
     try:
         data = research.lookup(raw)
         data["news"] = store.recent(limit=25, symbol=raw)
+        data["halts_today"] = store.halt_count_today(raw)
         return data
     except research.FMPError as e:
         return {"error": f"Couldn't find data for “{raw}”. {e}"}, 404
@@ -204,7 +206,7 @@ def halts_page():
 @app.route("/api/halts")
 def api_halts():
     try:
-        return {"halts": store.recent_halts(
+        out = {"halts": store.recent_halts(
                     limit=int(request.args.get("limit", 120)),
                     symbol=(request.args.get("symbol") or "").strip() or None,
                     code=(request.args.get("code") or "").strip() or None,
@@ -218,6 +220,12 @@ def api_halts():
                 "code_order": list(halts.CODES.keys()),
                 "stats": store.halt_stats(),
                 "watcher": halts.status()}
+        # Cache only, never a fetch: the halts page must render in the time
+        # it takes to read a table, not the time it takes FMP to answer.
+        out["floats"] = floats.cached_only(h["symbol"] for h in out["halts"])
+        out["float_tiers"] = [{"under": c if c != float("inf") else None,
+                               "name": n, "note": t} for c, n, t in floats.TIERS]
+        return out
     except Exception as e:
         log(f"halts page failed: {e}")
         return {"error": "Could not read the halt feed."}, 500
@@ -281,6 +289,7 @@ def api_scoreboard():
 def api_status():
     return {"stream": news_stream.status(), "store": store.stats(),
             "filings": filings.status(), "halts": halts.status(),
+            "floats": floats.status(),
             "now": datetime.now(timezone.utc).isoformat()}
 
 

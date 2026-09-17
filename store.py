@@ -747,6 +747,19 @@ def recent_halts(limit=120, symbol=None, code=None, open_only=False,
     return [dict(r) for r in _conn().execute(sql, args)]
 
 
+def halt_count_today(symbol):
+    """How many times this symbol has halted on the most recent trading day
+    it halted -- the number the quick check pairs with the float."""
+    c = _conn()
+    row = c.execute("SELECT halt_date FROM halts WHERE symbol = ? "
+                    "ORDER BY COALESCE(halted_at, seen_at) DESC LIMIT 1",
+                    (symbol.upper(),)).fetchone()
+    if not row or not row["halt_date"]:
+        return 0
+    return c.execute("SELECT COUNT(*) n FROM halts WHERE symbol = ? AND halt_date = ?",
+                     (symbol.upper(), row["halt_date"])).fetchone()["n"]
+
+
 def halts_needing_grade(cutoff_iso, limit=20):
     """Halts that have reopened long enough ago to measure, oldest first."""
     rows = _conn().execute(

@@ -220,6 +220,14 @@ def lookup(symbol):
             "year_high": _num(q.get("yearHigh")), "year_low": _num(q.get("yearLow")),
         },
     }
+    # Float, from the shared cache: the research panel and the Halts tab
+    # must never disagree about the same number.
+    try:
+        import floats
+        fl = floats.get(symbol)
+        data["float"] = fl
+    except Exception:
+        data["float"] = None
     data["read"] = valuation_read(pe, fwd_pe, rev_growth, margin, upside)
     data["cached"] = False
     _cache[symbol] = (time.time(), data)

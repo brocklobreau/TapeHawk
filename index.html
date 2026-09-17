@@ -165,6 +165,23 @@
   .kv span:first-child { color:var(--muted); }
   .kv span:last-child { font-family:var(--mono); }
   .desc { padding:0 14px 14px; color:var(--muted); font-size:12.5px; line-height:1.6; }
+
+  /* Share float. Its own card, above the valuation grid: for a name that is
+     halting, the float is the first number a trader wants and the P/E is
+     irrelevant. Tier carried as colour so it reads before the digits do. */
+  .flt { margin:12px 14px 0; border:1px solid var(--line); border-radius:9px; background:var(--surface-2); }
+  .flt > h4 { margin:0; padding:9px 13px; font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+              color:var(--faint); border-bottom:1px solid var(--line); }
+  .flt-top { display:flex; align-items:baseline; gap:14px; padding:12px 13px 6px; flex-wrap:wrap; }
+  .flt-big { font-family:var(--mono); font-size:29px; font-weight:700; line-height:1; }
+  .flt-big.micro { color:#FF6B6B; } .flt-big.low { color:var(--accent); }
+  .flt-big.mid { color:var(--ink); } .flt-big.large { color:var(--muted); }
+  .flt-lab { font-size:12.5px; color:var(--muted); }
+  .flt-lab b { color:var(--ink); font-weight:600; }
+  .flt-facts { display:flex; gap:18px; flex-wrap:wrap; padding:2px 13px 10px; font-size:12.5px; color:var(--muted); }
+  .flt-facts b { font-family:var(--mono); color:var(--ink); font-weight:600; }
+  .flt-note { padding:0 13px 11px; font-size:12px; color:var(--muted); line-height:1.55; }
+  .flt-note.warn { color:var(--faint); }
   .note { padding:0 14px 14px; color:var(--faint); font-size:11.5px; line-height:1.55; }
 
   /* Earnings day. Given its own card rather than another row in the stats grid
@@ -477,6 +494,30 @@
     toggleStory(host, host.getAttribute('data-id'));
   });
 
+  function shares(n){ if(n==null||isNaN(n))return '—'; n=+n;
+    return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(n<10e6?2:1)+'M':n>=1e3?(n/1e3).toFixed(0)+'K':String(Math.round(n)); }
+  // Outstanding is an upper bound on float. When that is all FMP has, it is
+  // shown -- but labelled, because a 4M-float name with 30M outstanding
+  // presented as "30M float" would look like a stock that cannot run.
+  function floatCard(d){
+    var f=d.float;
+    if(!f) return '<div class="flt"><h4>Float</h4><div class="flt-note warn">No share-count data for this name.</div></div>';
+    var basis=f.is_float?f.float_shares:f.outstanding, ht=d.halts_today||0;
+    return '<div class="flt"><h4>'+(f.is_float?'Float':'Shares outstanding')+'</h4>'+
+      '<div class="flt-top"><span class="flt-big '+esc(f.tier||'')+'">'+shares(basis)+'</span>'+
+        '<span class="flt-lab">'+(f.tier?'<b>'+esc(f.tier)+' float</b>':'')+
+        (ht?' · halted <b>'+ht+'×</b> today':'')+'</span></div>'+
+      '<div class="flt-facts">'+
+        (f.is_float?'<span>Outstanding <b>'+shares(f.outstanding)+'</b></span>':'')+
+        (f.free_float_pct!=null?'<span>Free float <b>'+(+f.free_float_pct).toFixed(1)+'%</b></span>':'')+
+        (f.as_of?'<span>As of <b>'+esc(f.as_of)+'</b></span>':'')+
+      '</div>'+
+      (f.tier_note?'<div class="flt-note">'+esc(f.tier_note)+'</div>':'')+
+      (f.is_float?'':'<div class="flt-note warn">Float itself was not available — this is shares outstanding, '+
+        'an upper bound. The real float may be much smaller.</div>')+
+      '<div class="flt-note warn">Float moves on offerings and lock-up expiries. Check the SEC Filings tab for anything recent.</div>'+
+    '</div>';
+  }
   function kv(k,v,cls){ return '<div class="kv"><span>'+esc(k)+'</span><span class="'+(cls||'')+'">'+v+'</span></div>'; }
 
   // --- earnings-day behaviour ------------------------------------------------
@@ -604,6 +645,7 @@
           (rd.read?'<div class="read"><h4>'+esc(rd.read)+'</h4><ul>'+
             (rd.notes||[]).map(function(n){return '<li>'+esc(n)+'</li>';}).join('')+'</ul></div>':'')+
           '<div id="earnbox"></div>'+
+          floatCard(d)+
           '<div class="grid">'+
             '<h4>Valuation</h4>'+
             kv('Market cap',money(d.market_cap))+kv('P/E',num(v.pe,1))+

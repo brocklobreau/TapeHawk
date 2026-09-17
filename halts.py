@@ -239,6 +239,16 @@ def poll_once(store, log=print):
         log(f"halts: {stored} new, {updated} resumption(s) filled in"
             + ("" if _primed[0] else " -- first pass"))
     _primed[0] = True
+    # Float for today's names, a few per pass, so it is on the page by the
+    # time a reader looks. Still-halted first: those are the ones being
+    # decided on right now.
+    try:
+        import floats
+        order = ([h["symbol"] for h in rows if not h.get("resumed_at")]
+                 + [h["symbol"] for h in rows])
+        floats.warm(order, log=log)
+    except Exception as e:
+        log(f"floats: warm-up skipped ({e})")
     return stored
 
 
