@@ -515,7 +515,8 @@
       (f.tier_note?'<div class="flt-note">'+esc(f.tier_note)+'</div>':'')+
       (f.is_float?'':'<div class="flt-note warn">Float itself was not available — this is shares outstanding, '+
         'an upper bound. The real float may be much smaller.</div>')+
-      '<div class="flt-note warn">Float moves on offerings and lock-up expiries. Check the SEC Filings tab for anything recent.</div>'+
+      '<div class="flt-note warn">Float moves on offerings and lock-up expiries. '+
+        '<a href="/filings?ticker='+encodeURIComponent(d.ticker)+'">Run the offering check for '+esc(d.ticker)+' →</a></div>'+
     '</div>';
   }
   function kv(k,v,cls){ return '<div class="kv"><span>'+esc(k)+'</span><span class="'+(cls||'')+'">'+v+'</span></div>'; }

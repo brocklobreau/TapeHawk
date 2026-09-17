@@ -26,6 +26,7 @@ import earnings
 import filings
 import floats
 import halts
+import offerings
 import news_stream
 import outcomes
 import research
@@ -231,6 +232,21 @@ def api_halts():
         return {"error": "Could not read the halt feed."}, 500
 
 
+@app.route("/api/offerings")
+def api_offerings():
+    """The offering check: one ticker, its dilution-relevant filings from
+    EDGAR, and a verdict. Live lookup, cached for half an hour."""
+    raw = (request.args.get("ticker") or "").strip().upper()
+    if not raw or len(raw) > 12 or not all(c.isalnum() or c in ".-" for c in raw):
+        return {"error": "Enter a ticker symbol."}, 400
+    try:
+        out = offerings.check(raw, log=log)
+    except Exception as e:
+        log(f"offering check failed for {raw}: {e}")
+        return {"error": "Offering check failed — try again shortly."}, 502
+    return (out, 404) if out.get("error") and not out.get("filings") else out
+
+
 @app.route("/filings")
 def filings_page():
     return send_from_directory(HERE, "filings.html")
@@ -289,7 +305,7 @@ def api_scoreboard():
 def api_status():
     return {"stream": news_stream.status(), "store": store.stats(),
             "filings": filings.status(), "halts": halts.status(),
-            "floats": floats.status(),
+            "floats": floats.status(), "offerings": offerings.status(),
             "now": datetime.now(timezone.utc).isoformat()}
 
 

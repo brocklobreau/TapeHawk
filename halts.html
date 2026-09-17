@@ -61,6 +61,8 @@
            font-variant-numeric:tabular-nums; }
   .dim { color:var(--faint); } .up { color:var(--good); } .down { color:var(--bad); }
   .empty { padding:24px 16px; color:var(--muted); line-height:1.65; }
+  a.tick { text-decoration:none; }
+  a.tick:hover { border-color:var(--accent); color:var(--accent); }
   .tick { font-family:var(--mono); font-size:12.5px; font-weight:700; padding:2px 7px;
           border-radius:4px; background:var(--surface-2); border:1px solid var(--line); }
 
@@ -412,7 +414,7 @@
         return '<tr>'+
           '<td class="num">'+esc(clock(h.halted_at))+
             '<div class="dim" style="font-size:11px">'+esc(day(h.halted_at))+'</div></td>'+
-          '<td><span class="tick">'+esc(h.symbol)+'</span>'+seqTag(h.seq)+
+          '<td><a class="tick" href="/filings?ticker='+encodeURIComponent(h.symbol)+'" title="Offering check for '+esc(h.symbol)+' on the SEC Filings tab">'+esc(h.symbol)+'</a>'+seqTag(h.seq)+
             (h.name?'<div class="dim" style="font-size:11px;max-width:16ch;overflow:hidden;'+
               'text-overflow:ellipsis;white-space:nowrap">'+esc(h.name)+'</div>':'')+
             dirTag(h)+'</td>'+

@@ -148,7 +148,7 @@ MAX_BODY_BYTES = 220_000
 
 _rate_lock = threading.Lock()
 _last_request = [0.0]
-_ticker_cache = {"at": 0.0, "map": {}}
+_ticker_cache = {"at": 0.0, "map": {}, "by_ticker": {}, "names": {}}
 # The first poll after a restart sees the whole recent feed as "new". Tracked
 # so the log can say which pass was the priming one, and so that anything
 # reacting to new filings later (a notifier, a webhook) has the hook it needs
@@ -245,19 +245,30 @@ def ticker_map(log=print):
         return _ticker_cache["map"]
     try:
         raw = _get(TICKERS_URL, as_json=True)
-        out = {}
+        out, rev, names = {}, {}, {}
         # Shipped as {"0": {...}, "1": {...}}; tolerate a plain list too.
         rows = raw.values() if isinstance(raw, dict) else raw
         for row in rows:
             cik, tic = row.get("cik_str"), row.get("ticker")
             if cik and tic:
                 out[int(cik)] = str(tic).upper()
+                rev[str(tic).upper()] = int(cik)
+                names[int(cik)] = row.get("title") or None
         if out:
-            _ticker_cache.update(at=time.time(), map=out)
+            _ticker_cache.update(at=time.time(), map=out, by_ticker=rev, names=names)
             log(f"filings: ticker table loaded ({len(out)} symbols)")
     except Exception as e:
         log(f"filings: ticker table unavailable ({e}) -- filings will show without symbols")
     return _ticker_cache["map"]
+
+
+def cik_for(ticker, log=print):
+    """(cik, company name) for a ticker, or (None, None). The reverse of the
+    ticker table, loaded by the same call so the two can never disagree."""
+    ticker_map(log=log)
+    t = (ticker or "").upper().strip()
+    cik = _ticker_cache["by_ticker"].get(t)
+    return cik, (_ticker_cache["names"].get(cik) if cik else None)
 
 
 # --- source 1: the real-time Atom feed --------------------------------------

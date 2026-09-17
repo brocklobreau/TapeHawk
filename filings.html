@@ -75,6 +75,37 @@
   a:has(> .badge), td a { text-decoration:none; }
   .badge.new { background:rgba(255,176,32,.16); color:var(--accent); }
   .badge.amend { background:var(--surface-2); color:var(--muted); }
+  /* The offering check. Verdict lines first, worst first, then the filings
+     behind them -- a reader with five minutes reads the top line and stops. */
+  .ofform { display:flex; gap:8px; max-width:360px; }
+  .ofform input { flex:1; min-width:0; background:var(--surface-2); color:var(--ink);
+    border:1px solid var(--line); border-radius:7px; padding:9px 12px; font-size:15px;
+    font-family:var(--mono); text-transform:uppercase; letter-spacing:.04em; }
+  .ofform input:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
+  .ofform button { background:var(--accent); color:#1a1205; border:0; border-radius:7px;
+    padding:9px 16px; font-weight:700; font-size:14px; cursor:pointer; }
+  .ofout { margin-top:12px; }
+  .ofout .who { font-size:13px; color:var(--muted); margin-bottom:8px; }
+  .ofout .who b { color:var(--ink); font-family:var(--mono); }
+  .verdict { list-style:none; margin:0 0 10px; padding:0; display:grid; gap:6px; }
+  .verdict li { padding:9px 12px; border-radius:7px; font-size:13.5px; line-height:1.45;
+    border:1px solid var(--line); background:var(--surface-2); }
+  .verdict li.red { border-color:rgba(240,74,74,.45); background:rgba(240,74,74,.08); }
+  .verdict li.red::before { content:'RED FLAG  '; font-weight:700; font-size:10.5px; letter-spacing:.06em; color:var(--bad); }
+  .verdict li.amber { border-color:rgba(255,176,32,.4); background:rgba(255,176,32,.07); }
+  .verdict li.amber::before { content:'CAUTION  '; font-weight:700; font-size:10.5px; letter-spacing:.06em; color:var(--accent); }
+  .verdict li.clear { border-color:rgba(63,191,95,.35); background:rgba(63,191,95,.07); }
+  .verdict li.clear::before { content:'NOTHING FOUND  '; font-weight:700; font-size:10.5px; letter-spacing:.06em; color:var(--good); }
+  .oflist { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .oflist th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--faint); padding:6px 8px; border-bottom:1px solid var(--line); }
+  .oflist td { padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; min-width:9ch; }
+  .oflist td:nth-child(3) { min-width:22ch; }
+  .oflist .form { font-family:var(--mono); font-weight:700; white-space:nowrap; }
+  .oflist .form.red { color:var(--bad); } .oflist .form.amber { color:var(--accent); } .oflist .form.note { color:var(--muted); }
+  .oflist .when { font-family:var(--mono); white-space:nowrap; color:var(--muted); }
+  .ofout .fine { font-size:11.5px; color:var(--faint); margin-top:8px; line-height:1.5; }
+  .ofout .err { color:var(--bad); font-size:13.5px; }
   .who { max-width:280px; }
   .issuer { font-weight:600; }
   .filters { display:flex; gap:6px; padding:10px 14px; border-bottom:1px solid var(--line);
@@ -144,6 +175,17 @@
   <div id="warn"></div>
 
   <section class="panel">
+    <h2>Offering check <span class="rowcount">is there supply waiting to hit this stock?</span></h2>
+    <div class="pad">
+      <form class="ofform" id="ofform" autocomplete="off">
+        <input id="ofq" type="text" placeholder="Ticker" maxlength="12" aria-label="Ticker to check" spellcheck="false">
+        <button type="submit">Check</button>
+      </form>
+      <div id="ofout" class="ofout"></div>
+    </div>
+  </section>
+
+  <section class="panel">
     <h2>The feed</h2>
     <div class="hero pad" id="hero"></div>
   </section>
@@ -189,6 +231,56 @@
 
 <script>
 (function(){
+  // --- the offering check ---------------------------------------------------
+  var ofform=document.getElementById('ofform'), ofq=document.getElementById('ofq'),
+      ofout=document.getElementById('ofout');
+  function esc0(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function ago(n){ return n===0?'today':n===1?'yesterday':n+' days ago'; }
+  function renderOffering(d){
+    if(d.error && !(d.filings||[]).length){
+      ofout.innerHTML='<div class="err">'+esc0(d.error)+'</div>'+
+        (d.detail?'<div class="fine">'+esc0(d.detail)+'</div>':'');
+      return;
+    }
+    var v=d.verdict||[], rows=d.filings||[];
+    var html='<div class="who"><b>'+esc0(d.ticker)+'</b> · '+esc0(d.name||'')+
+      ' · CIK '+esc0(d.cik)+' · <a href="'+esc0(d.edgar_url)+'" target="_blank" rel="noopener noreferrer">all filings on EDGAR ↗</a></div>';
+    html+='<ul class="verdict">'+
+      (v.length ? v.map(function(x){ return '<li class="'+esc0(x.severity)+'">'+esc0(x.text)+'</li>'; }).join('')
+                : '<li class="clear">No offering, shelf, private placement or resale registration in the last '+
+                  d.window_days+' days (shelves checked back '+d.shelf_years+' years). '+
+                  'That is what EDGAR shows, not a guarantee — an ATM can run off an older shelf.</li>')+
+      '</ul>';
+    if(rows.length){
+      html+='<div class="scroll"><table class="oflist"><thead><tr><th>Filed</th><th>Form</th><th>What it means</th><th>Doc</th></tr></thead><tbody>'+
+        rows.map(function(r){
+          return '<tr><td class="when">'+esc0(r.date)+'<br><span class="dim">'+ago(r.age_days)+'</span></td>'+
+            '<td class="form '+esc0(r.severity)+'">'+esc0(r.form)+(r.items&&r.items.length?'<br><span class="dim" style="font-weight:400">'+esc0(r.items.join(', '))+'</span>':'')+'</td>'+
+            '<td>'+esc0(r.label)+(r.description?'<div class="dim">'+esc0(r.description)+'</div>':'')+'</td>'+
+            '<td>'+(r.url?'<a href="'+esc0(r.url)+'" target="_blank" rel="noopener noreferrer">open ↗</a>':'')+'</td></tr>';
+        }).join('')+'</tbody></table></div>';
+    }
+    html+='<div class="fine">Forms that create supply, from the company\'s own EDGAR history. '+
+      'An at-the-market programme is not a form of its own — it hides inside an 8-K item 1.01 exhibit or a '+
+      'prospectus supplement, so a shelf plus a 1.01 means open the document. Direction here is what was '+
+      '<i>filed</i>, not a prediction.'+(d.cached?' Cached within the last 30 minutes.':'')+'</div>';
+    ofout.innerHTML=html;
+  }
+  ofform.addEventListener('submit', function(e){
+    e.preventDefault();
+    var t=(ofq.value||'').trim().toUpperCase();
+    if(!t) return;
+    ofout.innerHTML='<div class="dim">Reading '+esc0(t)+'\'s filings on EDGAR…</div>';
+    fetch('/api/offerings?ticker='+encodeURIComponent(t))
+      .then(function(r){ return r.json(); }).then(renderOffering)
+      .catch(function(){ ofout.innerHTML='<div class="err">Check failed — try again.</div>'; });
+  });
+  // Deep link: /filings?ticker=MEDS runs the check on load, so a halt row can
+  // send a reader here with the answer already loading.
+  var qs=new URLSearchParams(location.search).get('ticker');
+  if(qs){ ofq.value=qs.toUpperCase(); ofform.dispatchEvent(new Event('submit')); }
+
   var hero=document.getElementById('hero'), tablewrap=document.getElementById('tablewrap'),
       filersPanel=document.getElementById('filerspanel'), filers=document.getElementById('filers'),
       warn=document.getElementById('warn'),
