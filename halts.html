@@ -140,6 +140,16 @@
   .rowcount { color:var(--faint); font-weight:400; font-size:11.5px; text-transform:none;
               letter-spacing:0; }
   .glossary td { font-size:12.5px; }
+  .glossary tr.group td { padding:9px 14px 5px; font-size:10.5px; text-transform:uppercase;
+    letter-spacing:.08em; color:var(--faint); font-weight:700; background:var(--surface-2);
+    border-bottom:1px solid var(--line); }
+  .newsseq .step { display:grid; grid-template-columns:1fr; gap:4px; padding:12px 0;
+    border-top:1px solid var(--line); }
+  .newsseq .step:first-child { border-top:0; padding-top:0; }
+  .newsseq .stephead { display:flex; align-items:center; gap:10px; }
+  .newsseq .stephead b { font-size:14px; }
+  .newsseq .step p { margin:0; font-size:13.5px; color:var(--muted); max-width:72ch; }
+  .newsseq .step p b, .newsseq .step p i { color:var(--ink); }
   @media (max-width:640px){ .meaning { max-width:24ch; } }
 </style>
 </head>
@@ -190,7 +200,36 @@
   </section>
 
   <section class="panel">
-    <h2>Code glossary</h2>
+    <h2>News halts <span class="rowcount">T1 → T2 → T3 is one halt, not three</span></h2>
+    <div class="pad newsseq">
+      <div class="step">
+        <div class="stephead"><span class="code news">T1</span><b>News pending</b></div>
+        <p>Trading is halted pending the release of material news. The exchange knows something
+        is coming; you do not. Nothing to read, no resumption time.</p>
+      </div>
+      <div class="step">
+        <div class="stephead"><span class="code news">T2</span><b>News released</b></div>
+        <p>The news has <b>begun</b> the dissemination process — that is Nasdaq's own wording.
+        T2 means the wire has the story, not that it has reached your screen. There is a real
+        gap, usually seconds, between the code flipping and the headline landing. Acting on the
+        code alone is trading the fact that <i>something</i> was announced, which says nothing
+        about direction.</p>
+      </div>
+      <div class="step">
+        <div class="stephead"><span class="code news">T3</span><b>News fully disseminated</b></div>
+        <p>Two clock times are now posted: when quotes may be entered and when trading resumes.
+        This is the only state where you know both the news and the schedule.</p>
+      </div>
+      <p class="caveat" style="margin:6px 0 0">A news halt reopens through the same auction as a
+      volatility pause, but its auction collar is set off the last sale at the greater of $1.00
+      or 10% — not the ±5% of an LULD pause — so the reopening print can land much further from
+      the halt price. On a $4 stock, $1 is 25%. Read <i>what</i> the news is before reading how
+      it feels: on a small cap that has been running, it is often an offering.</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Code glossary <span class="rowcount">grouped by what kind of halt it is</span></h2>
     <div class="vwrap"><div class="vscroll" id="glossary"></div></div>
   </section>
 </div>
@@ -293,6 +332,7 @@
     var st=d.stats||{}, w=d.watcher||{}, rows=d.halts||[];
     renderDirection(st);
     CODES=d.codes||CODES;
+    CODE_ORDER=d.code_order||CODE_ORDER;
     var o=st.overall;
 
     hero.innerHTML =
@@ -390,15 +430,30 @@
     } else { basepanel.style.display='none'; }
   }
 
+  var CODE_ORDER=[];
+  var FAMILY={pause:'Volatility pauses — five minutes, then an auction',
+              news:'News halts — a person stopped the tape so information can spread',
+              grave:'Trouble — the exchange or the SEC has a question about the company',
+              market:'Market-wide — nothing about this stock in particular',
+              ipo:'New listings — normal first-day sequence, not distress'};
   function renderGlossary(){
-    var keys=Object.keys(CODES);
+    // Server order, not alphabetical: JSON keys arrive sorted, which files
+    // T12 between T1 and T2 and breaks the one sequence a reader needs to see
+    // whole. Grouped by family so T1, T2 and T3 sit together under one label.
+    var keys=(CODE_ORDER.length?CODE_ORDER:Object.keys(CODES)).filter(function(k){return CODES[k];});
     if(!keys.length){ glossary.innerHTML='<div class="empty">Loading…</div>'; return; }
+    var order=['pause','news','grave','market','ipo','unknown'];
+    var groups={};
+    keys.forEach(function(k){ var f=CODES[k].severity||'unknown'; (groups[f]=groups[f]||[]).push(k); });
     glossary.innerHTML='<table class="glossary"><thead><tr><th>Code</th><th>Name</th>'+
       '<th>What it implies</th></tr></thead><tbody>'+
-      keys.map(function(k){
-        return '<tr><td><span class="code '+CODES[k].severity+'">'+esc(k)+'</span></td>'+
-          '<td><b>'+esc(CODES[k].label)+'</b></td>'+
-          '<td class="dim">'+esc(CODES[k].note)+'</td></tr>';
+      order.filter(function(f){return groups[f];}).map(function(f){
+        return '<tr class="group"><td colspan="3">'+esc(FAMILY[f]||f)+'</td></tr>'+
+          groups[f].map(function(k){
+            return '<tr><td><span class="code '+CODES[k].severity+'">'+esc(k)+'</span></td>'+
+              '<td><b>'+esc(CODES[k].label)+'</b></td>'+
+              '<td class="dim">'+esc(CODES[k].note)+'</td></tr>';
+          }).join('');
       }).join('')+'</tbody></table>';
   }
 

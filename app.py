@@ -212,6 +212,10 @@ def api_halts():
                     direction=(request.args.get("direction") or "").strip() or None),
                 "codes": {k: {"label": v[0], "note": v[1], "severity": v[2]}
                           for k, v in halts.CODES.items()},
+                # Flask sorts JSON object keys, which put T12 between T1 and T2
+                # in the glossary and made the news sequence unreadable. The
+                # list keeps the order the glossary is written in.
+                "code_order": list(halts.CODES.keys()),
                 "stats": store.halt_stats(),
                 "watcher": halts.status()}
     except Exception as e:
