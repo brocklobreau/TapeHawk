@@ -338,8 +338,11 @@
     hero.innerHTML =
       stat('Halted right now', nnum(st.open_backed), st.open_backed?'news-backed, not yet reopened':'no news-backed halt open')+
       stat('With a story', nnum(st.total_backed), 'of '+nnum(st.total)+' halts, last '+(st.days||30)+' days')+
+      stat('Reopen → +5m', b&&b.median_move_5m!=null?(b.median_move_5m>0?'+':'')+b.median_move_5m.toFixed(2)+'%':'—',
+           b&&b.quick_n?'median scalp, news-backed, n='+b.quick_n+(b.quick_up_pct!=null?' · up '+b.quick_up_pct.toFixed(0)+'%':''):'nothing measured yet',
+           b&&b.median_move_5m!=null?(b.median_move_5m>0?'up':(b.median_move_5m<0?'down':'')):'')+
       stat('Reopen → +60m', b&&b.median_move_60m!=null?(b.median_move_60m>0?'+':'')+b.median_move_60m.toFixed(2)+'%':'—',
-           b?'median, news-backed, n='+b.follow_n:'nothing measured yet')+
+           b?'median hold, n='+b.follow_n:'nothing measured yet')+
       stat('Kept going', b&&b.continued_pct!=null?b.continued_pct.toFixed(0)+'%':'—',
            b?'hour moved with the gap':'needs graded halts')+
       stat('Feed', w.last_poll?'live':'starting…',
@@ -369,7 +372,7 @@
     } else {
       tablewrap.innerHTML='<table><thead><tr>'+
         '<th>Halted</th><th>Symbol</th><th>The story</th><th class="num">Float</th><th>Code</th>'+
-        '<th>Resumed</th><th class="num">Gap</th><th class="num">+15m</th><th class="num">+60m</th>'+
+        '<th>Resumed</th><th class="num">Gap</th><th class="num">+5m</th><th class="num">+15m</th><th class="num">+60m</th>'+
         '</tr></thead><tbody>'+
         shown.map(function(h){
           var open=!h.resumed_at, silent=!(h.news_importance>=5);
@@ -384,6 +387,7 @@
             '<td><span class="code '+sev(h.code)+'" title="'+esc(label(h.code)+' — '+note(h.code))+'">'+esc(h.code||'?')+'</span></td>'+
             '<td>'+(open?'<span class="halted-now live">Halted</span>':'<span class="num">'+esc(clock(h.resumed_at))+'</span>')+'</td>'+
             '<td class="num">'+pct(h.gap_pct)+'</td>'+
+            '<td class="num">'+pct(h.move_5m)+'</td>'+
             '<td class="num">'+pct(h.move_15m)+'</td>'+
             '<td class="num">'+pct(h.move_60m)+'</td>'+
           '</tr>';
@@ -400,23 +404,25 @@
     if(!b && !s){ proofpanel.style.display='none'; return; }
     proofpanel.style.display='';
     function row(cls, title, sub, x){
-      if(!x) return '<tr class="'+cls+'"><td><b>'+title+'</b><span>'+sub+'</span></td><td class="num dim" colspan="5">none measured yet</td></tr>';
+      if(!x) return '<tr class="'+cls+'"><td><b>'+title+'</b><span>'+sub+'</span></td><td class="num dim" colspan="6">none measured yet</td></tr>';
       var thin = x.n<10 ? ' <span class="dim">(too few)</span>' : '';
       return '<tr class="'+cls+'"><td><b>'+title+'</b><span>'+sub+'</span></td>'+
         '<td class="num">'+x.n+thin+'</td>'+
         '<td class="num">'+pct(x.median_gap)+'</td>'+
         '<td class="num">'+x.gapped_up_pct.toFixed(0)+'%</td>'+
+        '<td class="num">'+pct(x.median_move_5m)+'</td>'+
         '<td class="num">'+pct(x.median_move_60m)+'</td>'+
         '<td class="num">'+(x.continued_pct==null?'<span class="dim">—</span>':x.continued_pct.toFixed(0)+'% <span class="dim">n='+x.follow_n+'</span>')+'</td></tr>';
     }
     proof.innerHTML='<table class="proof"><thead><tr><th>Halt</th><th class="num">N</th>'+
-      '<th class="num">Median gap</th><th class="num">Gapped up</th><th class="num">Reopen → +60m</th><th class="num">Kept going</th></tr></thead><tbody>'+
+      '<th class="num">Median gap</th><th class="num">Gapped up</th><th class="num">Reopen → +5m</th><th class="num">Reopen → +60m</th><th class="num">Kept going</th></tr></thead><tbody>'+
       row('backed','News-backed','a Big News headline on the ticker around the halt', b)+
       row('silent','Silent','no headline behind it', s)+
       '</tbody></table>'+
       '<div class="empty" style="padding:12px 14px;font-size:12px">The claim behind this page is that halts with a '+
       'story behave differently from halts without one. This table is where that claim gets checked. '+
-      '<b>Reopen → +60m</b> is the signed median for buying the reopening print and holding an hour. '+
+      '<b>Reopen → +5m</b> is the scalp: buy the reopening print, out five minutes later, signed median. '+
+      '<b>Reopen → +60m</b> is the same trade held an hour. Measured on 1-minute bars where the price feed has them. '+
       (st.news_unchecked?st.news_unchecked+' recent halt(s) not yet checked for a headline.':'')+'</div>';
   }
 
@@ -427,17 +433,18 @@
     var order=[['up','1','▲ 1st halt of day'],['up','2','▲ 2nd halt'],['up','3+','▲ 3rd halt or later'],
                ['down','1','▼ 1st halt of day'],['down','2','▼ 2nd halt'],['down','3+','▼ 3rd halt or later']];
     function row(labelHtml, s, cls){
-      if(!s) return '<tr class="'+cls+'"><td>'+labelHtml+'</td><td class="num dim" colspan="5">none measured yet</td></tr>';
+      if(!s) return '<tr class="'+cls+'"><td>'+labelHtml+'</td><td class="num dim" colspan="6">none measured yet</td></tr>';
       var thin = s.n<10 ? ' <span class="dim">(too few)</span>' : '';
       return '<tr class="'+cls+'"><td>'+labelHtml+'</td>'+
         '<td class="num">'+s.n+thin+'</td>'+
         '<td class="num">'+pct(s.median_gap)+'</td>'+
         '<td class="num">'+s.gapped_up_pct.toFixed(0)+'%</td>'+
+        '<td class="num">'+pct(s.median_move_5m)+'</td>'+
         '<td class="num">'+pct(s.median_move_60m)+'</td>'+
         '<td class="num">'+(s.continued_pct==null?'<span class="dim">—</span>':s.continued_pct.toFixed(0)+'% <span class="dim">n='+s.follow_n+'</span>')+'</td></tr>';
     }
     dirrate.innerHTML='<table><thead><tr><th>Halt</th><th class="num">N</th>'+
-      '<th class="num">Median gap</th><th class="num">Gapped up</th><th class="num">Reopen → +60m</th><th class="num">Kept going</th></tr></thead><tbody>'+
+      '<th class="num">Median gap</th><th class="num">Gapped up</th><th class="num">Reopen → +5m</th><th class="num">Reopen → +60m</th><th class="num">Kept going</th></tr></thead><tbody>'+
       row('<b>▲ All up-halts</b>', bd.up, 'total')+
       order.filter(function(o){return o[0]==='up';}).map(function(o){ return row('<span class="dim">&nbsp;&nbsp;</span>'+esc(o[2]), (bs.up||{})[o[1]], ''); }).join('')+
       row('<b>▼ All down-halts</b>', bd.down, 'total')+

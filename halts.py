@@ -366,10 +366,10 @@ def grade_pending(store, outcomes, log=print):
         done += 1
     if done:
         log(f"halts: graded {done}")
-    # Halts measured before direction existed get measured again, a few per
-    # pass, so the split tables draw on history instead of starting empty.
-    # One bar request each; capped so it never competes with fresh grading.
-    redo = store.halts_needing_direction(limit=MAX_DIRECTION_BACKFILL)
+    # Halts measured under an older definition get measured again, a few per
+    # pass, so the tables never mix two versions of a number. One bar request
+    # each; capped so it never competes with fresh grading.
+    redo = store.halts_needing_remeasure(limit=MAX_DIRECTION_BACKFILL)
     fixed = 0
     for h in redo:
         try:
@@ -380,14 +380,32 @@ def grade_pending(store, outcomes, log=print):
         store.mark_halt_graded(h["halt_key"], result or {})
         fixed += 1 if result and result.get("direction") else 0
     if redo:
-        log(f"halts: direction filled in for {fixed} of {len(redo)} older halt(s)")
+        log(f"halts: re-measured {fixed} of {len(redo)} older halt(s) under the current definition")
     return done
+
+
+BAR_MINUTES = 1
+
+
+def _bars(outcomes, symbol, day):
+    try:
+        bars = outcomes.fetch_bars(symbol, day, minutes=BAR_MINUTES)
+    except TypeError:
+        bars = None                     # a fetch_bars without the parameter
+    return bars or outcomes.fetch_bars(symbol, day)
+
+
+def _interval(bars):
+    """The bar width, from the smallest gap between consecutive bars."""
+    gaps = [b[0] - a[0] for a, b in zip(bars, bars[1:]) if b[0] > a[0]]
+    return min(gaps) if gaps else timedelta(minutes=5)
 
 
 def measure_halt(h, outcomes):
     """Returns the reopening gap, the run-in, and the follow-through, or None.
 
-    into  = close of the bar CONTAINING the halt: the last print before it.
+    into  = close of the bar CONTAINING the halt: the last print before it
+            (to the minute when 1-minute bars are available).
             Nothing trades during a halt, so that bar's close is the halt
             price itself, which is the number a trader is holding against.
     open  = open of the bar containing the resumption: the reopening print.
@@ -404,10 +422,14 @@ def measure_halt(h, outcomes):
     t_open = outcomes.to_market_time(resumed)
     if t_halt is None or t_open is None:
         return None
-    bars = outcomes.fetch_bars(symbol, t_open.date())
+    # 1-minute bars when FMP has them, so "+5m" means five minutes. The bar
+    # width is then read off the data rather than assumed: a plan without
+    # 1-minute history answers with nothing, and the fallback is 5-minute
+    # bars, which every later step must handle without being told.
+    bars = _bars(outcomes, symbol, t_open.date())
     if not bars:
         return None
-    five = timedelta(minutes=5)
+    five = _interval(bars)
 
     pre = None
     for dt, _o, c in bars:
@@ -463,7 +485,7 @@ def measure_halt(h, outcomes):
            "into_price": round(into, 4), "reopen_price": round(reopen, 4),
            "gap_pct": round((reopen - into) / into * 100, 2),
            "run_in_pct": run_in, "direction": classify_direction(run_in)}
-    for mins, field in ((15, "move_15m"), (60, "move_60m")):
+    for mins, field in ((5, "move_5m"), (15, "move_15m"), (60, "move_60m")):
         target = t_open + timedelta(minutes=mins)
         val = None
         for dt, _o, c in bars[reopen_idx:]:

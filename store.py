@@ -121,7 +121,9 @@ CREATE TABLE IF NOT EXISTS halts (
   news_importance INTEGER,
   news_at         TEXT,
   news_url        TEXT,
-  news_checked_at TEXT
+  news_checked_at TEXT,
+  move_5m         REAL,
+  grade_version   INTEGER
 );
 
 -- Accession numbers of 8-Ks already judged routine. Reading an 8-K's header
@@ -194,7 +196,8 @@ def _conn():
                          ("seq", "INTEGER"), ("into_price", "REAL"),
                          ("news_id", "INTEGER"), ("news_headline", "TEXT"),
                          ("news_importance", "INTEGER"), ("news_at", "TEXT"),
-                         ("news_url", "TEXT"), ("news_checked_at", "TEXT")):
+                         ("news_url", "TEXT"), ("news_checked_at", "TEXT"),
+                         ("move_5m", "REAL"), ("grade_version", "INTEGER")):
             if col not in hhave:
                 c.execute(f"ALTER TABLE halts ADD COLUMN {col} {ddl}")
         c.executescript(INDEX_SQL)          # only now are all columns present
@@ -825,31 +828,43 @@ def halts_needing_grade(cutoff_iso, limit=20):
     return [dict(r) for r in rows]
 
 
+# Bumped whenever the measurement changes in a way that makes old rows
+# incomparable with new ones. Rows graded under an older version are measured
+# again, a few per pass, so the tables never mix two definitions of a number.
+#   1: 5-minute bars, gap from the settled pre-halt price
+#   2: 1-minute bars, gap from the halt price, run-in and direction, +5m
+GRADE_VERSION = 2
+
+
 def mark_halt_graded(halt_key, result):
     c = _conn()
     c.execute("UPDATE halts SET graded_at = ?, pre_price = ?, reopen_price = ?, "
-              "gap_pct = ?, move_15m = ?, move_60m = ?, run_in_pct = ?, "
-              "direction = ?, into_price = ? WHERE halt_key = ?",
+              "gap_pct = ?, move_5m = ?, move_15m = ?, move_60m = ?, run_in_pct = ?, "
+              "direction = ?, into_price = ?, grade_version = ? WHERE halt_key = ?",
               (datetime.now(timezone.utc).isoformat(), result.get("pre_price"),
                result.get("reopen_price"), result.get("gap_pct"),
-               result.get("move_15m"), result.get("move_60m"),
+               result.get("move_5m"), result.get("move_15m"), result.get("move_60m"),
                result.get("run_in_pct"),
-               # 'unknown' rather than NULL on a miss, so the backfill below
+               # 'unknown' rather than NULL on a miss, so the re-measure queue
                # does not pick the same unmeasurable halt up again every pass.
                result.get("direction") or "unknown", result.get("into_price"),
-               halt_key))
+               GRADE_VERSION, halt_key))
     c.commit()
 
 
-def halts_needing_direction(limit=10):
-    """Halts graded before direction existed. Measured again, a few per
-    pass, so the split tables fill in from history rather than from zero."""
+def halts_needing_remeasure(limit=10):
+    """Halts graded under an older measurement. Newest first: the rows a
+    reader is looking at heal first."""
     rows = _conn().execute(
         "SELECT halt_key, symbol, code, halted_at, resumed_at FROM halts "
-        "WHERE graded_at IS NOT NULL AND gap_pct IS NOT NULL "
-        "AND direction IS NULL AND resumed_at IS NOT NULL "
-        "ORDER BY resumed_at DESC LIMIT ?", (int(limit),))
+        "WHERE graded_at IS NOT NULL AND gap_pct IS NOT NULL AND resumed_at IS NOT NULL "
+        "AND (grade_version IS NULL OR grade_version < ?) "
+        "ORDER BY resumed_at DESC LIMIT ?", (GRADE_VERSION, int(limit)))
     return [dict(r) for r in rows]
+
+
+# Kept as an alias: the halt watcher called this before versions existed.
+halts_needing_direction = halts_needing_remeasure
 
 
 def halt_stats(days=30):
@@ -866,7 +881,7 @@ def halt_stats(days=30):
     still_open = c.execute("SELECT COUNT(*) n FROM halts WHERE resumed_at IS NULL"
                            ).fetchone()["n"]
     graded = [dict(r) for r in c.execute(
-        "SELECT code, gap_pct, move_15m, move_60m, direction, seq, run_in_pct, "
+        "SELECT code, gap_pct, move_5m, move_15m, move_60m, direction, seq, run_in_pct, "
         "news_importance FROM halts WHERE graded_at IS NOT NULL "
         "AND gap_pct IS NOT NULL AND seen_at > ?", (since,))]
     for r in graded:
@@ -878,9 +893,17 @@ def halt_stats(days=30):
             return None
         follow = [r["move_60m"] for r in rows if r["move_60m"] is not None]
         follow_sorted = sorted(follow)
+        quick = sorted(r["move_5m"] for r in rows if r.get("move_5m") is not None)
         return {
             "n": len(gaps),
             "median_gap": round(gaps[len(gaps) // 2], 2),
+            # The scalp: reopening print to five minutes later, signed. For
+            # a trade that is in and out inside the first minutes this is
+            # the number; +60m describes a trade nobody here is taking.
+            "median_move_5m": round(quick[len(quick) // 2], 2) if quick else None,
+            "quick_n": len(quick),
+            "quick_up_pct": (round(100.0 * sum(1 for m in quick if m > 0) / len(quick), 1)
+                             if quick else None),
             # Signed, on purpose: bought the reopen, held an hour, this is the
             # typical result. The unsigned figures above describe volatility;
             # this one describes a trade.

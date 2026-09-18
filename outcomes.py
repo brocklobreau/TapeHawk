@@ -90,9 +90,11 @@ def _parse_bar_dt(v):
         return None
 
 
-def fetch_bars(symbol, day):
-    """5-minute bars for one session, oldest first."""
-    r = requests.get(f"{BASE}/historical-chart/{BAR_MIN}min",
+def fetch_bars(symbol, day, minutes=BAR_MIN):
+    """Intraday bars for one session, oldest first. 5-minute by default (the
+    headline grader); the halt grader asks for 1-minute so a "+5m" means five
+    minutes and not "somewhere in the reopening bar"."""
+    r = requests.get(f"{BASE}/historical-chart/{int(minutes)}min",
                      params={"symbol": symbol, "from": day.isoformat(),
                              "to": day.isoformat(), "apikey": _key()},
                      timeout=TIMEOUT)
