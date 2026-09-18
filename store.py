@@ -115,7 +115,13 @@ CREATE TABLE IF NOT EXISTS halts (
   run_in_pct    REAL,
   direction     TEXT,
   seq           INTEGER,
-  into_price    REAL
+  into_price    REAL,
+  news_id         INTEGER,
+  news_headline   TEXT,
+  news_importance INTEGER,
+  news_at         TEXT,
+  news_url        TEXT,
+  news_checked_at TEXT
 );
 
 -- Accession numbers of 8-Ks already judged routine. Reading an 8-K's header
@@ -185,7 +191,10 @@ def _conn():
                 c.execute(f"ALTER TABLE filings ADD COLUMN {col} {ddl}")
         hhave = {r["name"] for r in c.execute("PRAGMA table_info(halts)")}
         for col, ddl in (("run_in_pct", "REAL"), ("direction", "TEXT"),
-                         ("seq", "INTEGER"), ("into_price", "REAL")):
+                         ("seq", "INTEGER"), ("into_price", "REAL"),
+                         ("news_id", "INTEGER"), ("news_headline", "TEXT"),
+                         ("news_importance", "INTEGER"), ("news_at", "TEXT"),
+                         ("news_url", "TEXT"), ("news_checked_at", "TEXT")):
             if col not in hhave:
                 c.execute(f"ALTER TABLE halts ADD COLUMN {col} {ddl}")
         c.executescript(INDEX_SQL)          # only now are all columns present
@@ -621,6 +630,47 @@ def headlines_mentioning(symbol, start_iso, end_iso):
         (f'%"{symbol.upper()}"%', start_iso, end_iso)).fetchone()["n"]
 
 
+def best_headline_for(symbol, start_iso, end_iso):
+    """The strongest headline tagged with this ticker in a window, or None.
+
+    Strongest = highest importance, then most recent. Uses created_at -- when
+    the news happened -- so a restart that backfills the archive later cannot
+    make a silent halt look news-backed after the fact."""
+    if not symbol:
+        return None
+    row = _conn().execute(
+        "SELECT id, headline, importance, created_at, url FROM headlines "
+        "WHERE symbols LIKE ? AND created_at >= ? AND created_at <= ? "
+        "ORDER BY COALESCE(importance, 0) DESC, created_at DESC LIMIT 1",
+        (f'%"{symbol.upper()}"%', start_iso, end_iso)).fetchone()
+    return dict(row) if row else None
+
+
+def halts_needing_news(since_iso, limit=60):
+    """Halts to (re)check for a headline: recent ones without a Big News
+    match yet. Re-checked on every poll while young, because the wire often
+    writes the halt up a few minutes after the exchange declares it."""
+    rows = _conn().execute(
+        "SELECT halt_key, symbol, halted_at FROM halts "
+        "WHERE halted_at IS NOT NULL AND halted_at >= ? "
+        "AND (news_importance IS NULL OR news_importance < 5) "
+        "ORDER BY halted_at DESC LIMIT ?", (since_iso, int(limit)))
+    return [dict(r) for r in rows]
+
+
+def set_halt_news(halt_key, hit):
+    c = _conn()
+    now = datetime.now(timezone.utc).isoformat()
+    if hit:
+        c.execute("UPDATE halts SET news_id = ?, news_headline = ?, news_importance = ?, "
+                  "news_at = ?, news_url = ?, news_checked_at = ? WHERE halt_key = ?",
+                  (hit.get("id"), hit.get("headline"), hit.get("importance"),
+                   hit.get("created_at"), hit.get("url"), now, halt_key))
+    else:
+        c.execute("UPDATE halts SET news_checked_at = ? WHERE halt_key = ?", (now, halt_key))
+    c.commit()
+
+
 def filing_stats(days=30):
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     c = _conn()
@@ -727,10 +777,16 @@ def resequence_all(log=print):
         log(f"halts: numbered halts-of-the-day for {len(groups)} symbol-day(s)")
 
 
+BIG_NEWS_MIN = 5          # the Big News rail's own threshold
+
+
 def recent_halts(limit=120, symbol=None, code=None, open_only=False,
-                 direction=None):
+                 direction=None, news_only=False):
     sql = "SELECT * FROM halts WHERE 1=1"
     args = []
+    if news_only:
+        sql += " AND news_importance >= ?"
+        args.append(BIG_NEWS_MIN)
     if symbol:
         sql += " AND symbol = ?"
         args.append(symbol.upper())
@@ -810,9 +866,11 @@ def halt_stats(days=30):
     still_open = c.execute("SELECT COUNT(*) n FROM halts WHERE resumed_at IS NULL"
                            ).fetchone()["n"]
     graded = [dict(r) for r in c.execute(
-        "SELECT code, gap_pct, move_15m, move_60m, direction, seq, run_in_pct "
-        "FROM halts WHERE graded_at IS NOT NULL AND gap_pct IS NOT NULL "
-        "AND seen_at > ?", (since,))]
+        "SELECT code, gap_pct, move_15m, move_60m, direction, seq, run_in_pct, "
+        "news_importance FROM halts WHERE graded_at IS NOT NULL "
+        "AND gap_pct IS NOT NULL AND seen_at > ?", (since,))]
+    for r in graded:
+        r["backed"] = (r.get("news_importance") or 0) >= BIG_NEWS_MIN
 
     def summarise(rows):
         gaps = sorted(r["gap_pct"] for r in rows)
@@ -857,17 +915,33 @@ def halt_stats(days=30):
         if not q:
             return None
         return "1" if q == 1 else "2" if q == 2 else "3+"
-    by_direction = {d: summarise([r for r in graded if r["direction"] == d])
+    # The split the page is built around: halts with a Big News headline
+    # behind them versus halts on nothing. Everything directional below is
+    # computed on the news-backed set only -- the silent ones are the
+    # control, not the trade.
+    backed = [r for r in graded if r["backed"]]
+    silent = [r for r in graded if not r["backed"]]
+    by_news = {"backed": summarise(backed), "silent": summarise(silent)}
+    by_direction = {d: summarise([r for r in backed if r["direction"] == d])
                     for d in ("up", "down")}
     by_direction_seq = {}
     for d in ("up", "down"):
-        by_direction_seq[d] = {b: summarise([r for r in graded
+        by_direction_seq[d] = {b: summarise([r for r in backed
                                              if r["direction"] == d and seq_bucket(r) == b])
                                for b in ("1", "2", "3+")}
-    unknown_dir = sum(1 for r in graded if r["direction"] not in ("up", "down"))
+    unknown_dir = sum(1 for r in backed if r["direction"] not in ("up", "down"))
+    total_backed = c.execute("SELECT COUNT(*) n FROM halts WHERE seen_at > ? "
+                             "AND news_importance >= ?", (since, BIG_NEWS_MIN)).fetchone()["n"]
+    open_backed = c.execute("SELECT COUNT(*) n FROM halts WHERE resumed_at IS NULL "
+                            "AND news_importance >= ?", (BIG_NEWS_MIN,)).fetchone()["n"]
+    unchecked = c.execute("SELECT COUNT(*) n FROM halts WHERE seen_at > ? "
+                          "AND news_checked_at IS NULL", (since,)).fetchone()["n"]
 
     return {"days": days, "total": total, "open": still_open,
+            "total_backed": total_backed, "open_backed": open_backed,
+            "news_unchecked": unchecked,
             "overall": summarise(graded), "by_code": by_code,
+            "by_news": by_news,
             "by_direction": by_direction, "by_direction_seq": by_direction_seq,
             "direction_unknown": unknown_dir,
             "counts": counts,

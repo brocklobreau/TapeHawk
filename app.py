@@ -212,7 +212,9 @@ def api_halts():
                     symbol=(request.args.get("symbol") or "").strip() or None,
                     code=(request.args.get("code") or "").strip() or None,
                     open_only=request.args.get("open") == "1",
-                    direction=(request.args.get("direction") or "").strip() or None),
+                    direction=(request.args.get("direction") or "").strip() or None,
+                    # News-backed only unless the reader asks for the rest.
+                    news_only=request.args.get("all") != "1"),
                 "codes": {k: {"label": v[0], "note": v[1], "severity": v[2]}
                           for k, v in halts.CODES.items()},
                 # Flask sorts JSON object keys, which put T12 between T1 and T2

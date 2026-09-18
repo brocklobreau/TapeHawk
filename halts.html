@@ -160,6 +160,27 @@
   .newsseq .step p { margin:0; font-size:13.5px; color:var(--muted); max-width:72ch; }
   .newsseq .step p b, .newsseq .step p i { color:var(--ink); }
   @media (max-width:640px){ .meaning { max-width:24ch; } }
+
+  /* --- the headline behind the halt ------------------------------------ */
+  .story { max-width:34ch; min-width:22ch; font-size:12.5px; line-height:1.4; }
+  .story a { color:var(--ink); text-decoration:none; font-weight:600; }
+  .story a:hover { color:var(--accent); }
+  .story .when { display:block; font-family:var(--mono); font-size:10.5px; color:var(--faint); margin-top:3px; }
+  .story .imp { font-family:var(--mono); font-size:10px; font-weight:700; padding:1px 5px; border-radius:4px;
+                background:rgba(255,176,32,.16); color:var(--accent); margin-right:5px; vertical-align:1px; }
+  tr.silent td { opacity:.55; }
+  tr.silent .story { color:var(--faint); font-style:italic; }
+  /* Proof table: two rows, the whole argument for the page in one glance. */
+  .proof td:first-child b { display:block; }
+  .proof td:first-child span { font-size:11.5px; color:var(--faint); }
+  .proof tr.backed td:first-child b { color:var(--accent); }
+  details.codes { margin-bottom:16px; }
+  details.codes summary { cursor:pointer; list-style:none; padding:11px 14px; font-size:12px;
+    text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  details.codes summary::-webkit-details-marker { display:none; }
+  details.codes summary::before { content:'▸ '; color:var(--accent); }
+  details.codes[open] summary::before { content:'▾ '; }
+  details.codes summary .rowcount { text-transform:none; letter-spacing:0; }
 </style>
 </head>
 <body>
@@ -175,41 +196,41 @@
 </header>
 
 <div class="wrap">
-  <p class="lede">Every trading halt on US exchanges, straight from <b>Nasdaq's own halt
-  feed</b> — the authoritative record, not a headline about it. The <b>reason code</b> is the
-  part that matters: <b>LUDP</b> is a five-minute volatility pause, <b>T12</b> is an exchange
-  asking the company questions and can run for days.</p>
-  <p class="caveat">Once a halt has reopened and an hour has passed, it gets measured: the
-  gap from the last price before the halt to the reopening print, then what the next 15 and 60
-  minutes did. Every halt is measured, not a selected few — that is the point. These are
-  market-wide base rates to compare your own trades against, and they are descriptions of what
-  happened, not predictions of what happens next.</p>
+  <p class="lede">Only the halts with a <b>story</b>. A halt makes this list when a
+  <b>Big News</b> headline on the same ticker landed in the four hours before it or the
+  half hour after — the wire and the exchange agreeing something happened. Most halts
+  have no headline behind them; those are price moving on air, and they are hidden by
+  default.</p>
+  <p class="caveat">Every halt is still recorded and measured, story or not — the silent
+  ones are the control. The comparison lives lower on the page, and it is what decides
+  whether hiding them is right. Numbers are descriptions of what happened, not
+  predictions of what happens next.</p>
 
   <section class="panel">
-    <h2>The feed</h2>
+    <h2>News-backed halts</h2>
     <div class="hero pad" id="hero"></div>
   </section>
 
   <section class="panel">
-    <h2>Halts <span class="rowcount" id="count"></span></h2>
+    <h2>Halts with a story <span class="rowcount" id="count"></span></h2>
     <div class="filters" id="filters"></div>
     <div class="vwrap"><div class="vscroll" id="tablewrap">
       <div class="empty">Loading…</div>
     </div></div>
   </section>
 
-  <section class="panel" id="basepanel" style="display:none">
-    <h2>Base rate by code <span class="rowcount">what the reopening print actually did</span></h2>
-    <div class="vwrap"><div class="vscroll" id="baserate"></div></div>
+  <section class="panel" id="proofpanel" style="display:none">
+    <h2>Does the story matter? <span class="rowcount">news-backed vs silent, last 30 days</span></h2>
+    <div class="vwrap"><div class="vscroll" id="proof"></div></div>
   </section>
 
   <section class="panel" id="dirpanel" style="display:none">
-    <h2>Up-halts vs down-halts, by halt number <span class="rowcount">the split that matters</span></h2>
+    <h2>Up-halts vs down-halts, by halt number <span class="rowcount">news-backed only</span></h2>
     <div class="vwrap"><div class="vscroll" id="dirrate"></div></div>
   </section>
 
-  <section class="panel">
-    <h2>News halts <span class="rowcount">T1 → T2 → T3 is one halt, not three</span></h2>
+  <details class="codes panel">
+    <summary>Halt codes <span class="rowcount">T1 → T2 → T3, and what each code implies</span></summary>
     <div class="pad newsseq">
       <div class="step">
         <div class="stephead"><span class="code news">T1</span><b>News pending</b></div>
@@ -218,39 +239,32 @@
       </div>
       <div class="step">
         <div class="stephead"><span class="code news">T2</span><b>News released</b></div>
-        <p>The news has <b>begun</b> the dissemination process — that is Nasdaq's own wording.
-        T2 means the wire has the story, not that it has reached your screen. There is a real
-        gap, usually seconds, between the code flipping and the headline landing. Acting on the
-        code alone is trading the fact that <i>something</i> was announced, which says nothing
-        about direction.</p>
+        <p>The news has <b>begun</b> the dissemination process — Nasdaq's own wording. T2 means
+        the wire has the story, not that it has reached your screen. Acting on the code alone is
+        trading the fact that <i>something</i> was announced, which says nothing about direction.</p>
       </div>
       <div class="step">
         <div class="stephead"><span class="code news">T3</span><b>News fully disseminated</b></div>
         <p>Two clock times are now posted: when quotes may be entered and when trading resumes.
-        This is the only state where you know both the news and the schedule.</p>
+        The only state where you know both the news and the schedule.</p>
       </div>
       <p class="caveat" style="margin:6px 0 0">A news halt reopens through the same auction as a
-      volatility pause, but its auction collar is set off the last sale at the greater of $1.00
-      or 10% — not the ±5% of an LULD pause — so the reopening print can land much further from
-      the halt price. On a $4 stock, $1 is 25%. Read <i>what</i> the news is before reading how
-      it feels: on a small cap that has been running, it is often an offering.</p>
+      volatility pause, but its collar is set off the last sale at the greater of $1.00 or 10% —
+      not the ±5% of an LULD pause — so the reopening print can land much further from the halt
+      price. On a $4 stock, $1 is 25%.</p>
     </div>
-  </section>
-
-  <section class="panel">
-    <h2>Code glossary <span class="rowcount">grouped by what kind of halt it is</span></h2>
     <div class="vwrap"><div class="vscroll" id="glossary"></div></div>
-  </section>
+  </details>
 </div>
 
 <script>
 (function(){
   var hero=document.getElementById('hero'), tablewrap=document.getElementById('tablewrap'),
       filters=document.getElementById('filters'), glossary=document.getElementById('glossary'),
-      baserate=document.getElementById('baserate'), basepanel=document.getElementById('basepanel'),
+      proof=document.getElementById('proof'), proofpanel=document.getElementById('proofpanel'),
       dirrate=document.getElementById('dirrate'), dirpanel=document.getElementById('dirpanel'),
       count=document.getElementById('count');
-  var mode='', CODES={}, lastData=null;
+  var mode='', showAll=false, CODES={}, CODE_ORDER=[], FLOATS={}, lastData=null;
 
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
@@ -259,51 +273,157 @@
     var n=+v; return '<span class="'+(n>0?'up':(n<0?'down':''))+'">'+
       (n>0?'+':'')+n.toFixed(2)+'%</span>'; }
   function money(v){ return (v==null||isNaN(v))?'—':'$'+(+v).toFixed(2); }
-
+  function shares(v){
+    if(v==null||isNaN(v)) return '—'; var n=+v;
+    if(n>=1e9) return (n/1e9).toFixed(2)+'B';
+    if(n>=1e6) return (n/1e6).toFixed(n<10e6?2:1)+'M';
+    if(n>=1e3) return (n/1e3).toFixed(0)+'K';
+    return String(Math.round(n));
+  }
   // Times arrive as ISO with an offset. Rendered in the reader's own zone,
   // which for a US trader is market time -- never hand-formatted, because a
   // hand-rolled offset is how this project got a four-hour error once.
   function clock(iso){
-    if(!iso) return '—';
-    var t=Date.parse(iso);
-    if(!t) return '—';
+    if(!iso) return '—'; var t=Date.parse(iso); if(!t) return '—';
     return new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   }
-  function day(iso){
-    var t=Date.parse(iso||'');
-    if(!t) return '';
-    return new Date(t).toLocaleDateString([], {month:'short', day:'numeric'});
-  }
-
+  function day(iso){ var t=Date.parse(iso||''); if(!t) return '';
+    return new Date(t).toLocaleDateString([], {month:'short', day:'numeric'}); }
   function sev(code){ var c=CODES[(code||'').toUpperCase()]; return c?c.severity:'unknown'; }
   function label(code){ var c=CODES[(code||'').toUpperCase()]; return c?c.label:'Unrecognised code'; }
   function note(code){ var c=CODES[(code||'').toUpperCase()];
     return c?c.note:'Not in this glossary — check the listing exchange before trading it'; }
 
-  // "#3 today" is the number a runner's regulars watch. Highlighted from the
-  // second halt on: a second halt is the signal, a first is just a halt.
-  function seqTag(q){
-    if(!q) return '';
-    // A real space before it, not just a margin: copied text and screen
-    // readers should get "MEDS #2 today", not "MEDS#2 today".
-    return ' <span class="seq'+(q>=2?' hot':'')+'" title="Halt number '+q+' for this symbol today">#'+q+' today</span>';
-  }
+  function seqTag(q){ if(!q) return '';
+    return ' <span class="seq'+(q>=2?' hot':'')+'" title="Halt number '+q+' for this symbol today">#'+q+' today</span>'; }
   function dirTag(h){
-    if(!h.graded_at) return '';
-    var d=h.direction;
-    if(d==='up') return '<span class="dir up" title="Ran '+(h.run_in_pct!=null?'+'+(+h.run_in_pct).toFixed(1)+'%':'up')+' into the halt">▲ '+(h.run_in_pct!=null?'+'+(+h.run_in_pct).toFixed(1)+'% in':'up-halt')+'</span>';
-    if(d==='down') return '<span class="dir down" title="Fell '+(h.run_in_pct!=null?(+h.run_in_pct).toFixed(1)+'%':'')+' into the halt">▼ '+(h.run_in_pct!=null?(+h.run_in_pct).toFixed(1)+'% in':'down-halt')+'</span>';
-    if(d==='flat') return '<span class="dir flat" title="Was not moving much when halted">— flat in</span>';
+    if(!h.graded_at) return ''; var d=h.direction;
+    if(d==='up') return '<span class="dir up">▲ '+(h.run_in_pct!=null?'+'+(+h.run_in_pct).toFixed(1)+'% in':'up-halt')+'</span>';
+    if(d==='down') return '<span class="dir down">▼ '+(h.run_in_pct!=null?(+h.run_in_pct).toFixed(1)+'% in':'down-halt')+'</span>';
+    if(d==='flat') return '<span class="dir flat">— flat in</span>';
     return '';
+  }
+  function floatCell(f){
+    if(!f) return '<span class="dim">…</span>';
+    var v=f.is_float?f.float_shares:f.outstanding;
+    return '<span class="fl '+esc(f.tier||'')+'" title="'+esc(f.tier_note||'')+'">'+shares(v)+
+      '<span class="sub">'+(f.is_float?'float':'outstanding')+'</span></span>';
+  }
+  // The headline, and how far from the halt it landed. "34 min before" is
+  // the catalyst; "3 min after" is the wire writing the halt up.
+  function storyCell(h){
+    if(!h.news_headline) return '<div class="story">no headline on this ticker around the halt</div>';
+    var ht=Date.parse(h.halted_at||''), nt=Date.parse(h.news_at||'');
+    var rel='';
+    if(ht&&nt){ var m=Math.round((nt-ht)/60000);
+      rel = m===0?'as it halted' : m<0?(-m)+' min before the halt' : m+' min after the halt'; }
+    var hl=esc(h.news_headline);
+    return '<div class="story">'+
+      (h.news_importance>=5?'<span class="imp">BIG</span>':'')+
+      (h.news_url?'<a href="'+esc(h.news_url)+'" target="_blank" rel="noopener noreferrer">'+hl+'</a>':hl)+
+      (rel?'<span class="when">'+esc(rel)+'</span>':'')+'</div>';
+  }
+
+  function stat(k,v,n,cls){
+    return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v '+(cls||'')+'">'+v+
+           '</div><div class="n">'+n+'</div></div>';
+  }
+
+  function render(d){
+    var st=d.stats||{}, w=d.watcher||{}, rows=d.halts||[];
+    CODES=d.codes||CODES; CODE_ORDER=d.code_order||CODE_ORDER;
+    var fl=d.floats||{}; Object.keys(fl).forEach(function(k){ FLOATS[k]=fl[k]; });
+    var b=(st.by_news||{}).backed;
+
+    hero.innerHTML =
+      stat('Halted right now', nnum(st.open_backed), st.open_backed?'news-backed, not yet reopened':'no news-backed halt open')+
+      stat('With a story', nnum(st.total_backed), 'of '+nnum(st.total)+' halts, last '+(st.days||30)+' days')+
+      stat('Reopen → +60m', b&&b.median_move_60m!=null?(b.median_move_60m>0?'+':'')+b.median_move_60m.toFixed(2)+'%':'—',
+           b?'median, news-backed, n='+b.follow_n:'nothing measured yet')+
+      stat('Kept going', b&&b.continued_pct!=null?b.continued_pct.toFixed(0)+'%':'—',
+           b?'hour moved with the gap':'needs graded halts')+
+      stat('Feed', w.last_poll?'live':'starting…',
+           w.last_error?esc(String(w.last_error).slice(0,60)):(w.last_poll?'checked '+clock(w.last_poll):'no poll yet'),'text');
+
+    filters.innerHTML=
+      '<button class="chip'+(mode?'':' on')+'" data-mode="">All</button>'+
+      '<button class="chip'+(mode==='__open'?' on':'')+'" data-mode="__open">Still halted</button>'+
+      '<button class="chip'+(mode==='__up'?' on':'')+'" data-mode="__up">▲ Up-halts</button>'+
+      '<button class="chip'+(mode==='__down'?' on':'')+'" data-mode="__down">▼ Down-halts</button>'+
+      '<span class="spacer"></span>'+
+      '<button class="chip'+(showAll?' on':'')+'" data-mode="__all" title="Show the halts with no headline behind them too">'+
+        (showAll?'Hiding silent halts':'Include silent halts')+'</button>';
+
+    var shown=rows;
+    if(mode==='__open') shown=rows.filter(function(h){ return !h.resumed_at; });
+    else if(mode==='__up') shown=rows.filter(function(h){ return h.direction==='up'; });
+    else if(mode==='__down') shown=rows.filter(function(h){ return h.direction==='down'; });
+    count.textContent=shown.length+' shown';
+
+    if(!shown.length){
+      tablewrap.innerHTML='<div class="empty">'+(rows.length
+        ? '<b>Nothing under that filter.</b><br>Clear it to see the rest.'
+        : '<b>No news-backed halts yet.</b><br>A halt appears here the moment a Big News headline '+
+          'on the same ticker is matched to it — usually within a minute of the halt. Outside market '+
+          'hours an empty list is normal.'+(st.total?' '+nnum(st.total)+' halt(s) without a story are hidden.':''))+'</div>';
+    } else {
+      tablewrap.innerHTML='<table><thead><tr>'+
+        '<th>Halted</th><th>Symbol</th><th>The story</th><th class="num">Float</th><th>Code</th>'+
+        '<th>Resumed</th><th class="num">Gap</th><th class="num">+15m</th><th class="num">+60m</th>'+
+        '</tr></thead><tbody>'+
+        shown.map(function(h){
+          var open=!h.resumed_at, silent=!(h.news_importance>=5);
+          return '<tr'+(silent?' class="silent"':'')+'>'+
+            '<td class="num">'+esc(clock(h.halted_at))+
+              '<div class="dim" style="font-size:11px">'+esc(day(h.halted_at))+'</div></td>'+
+            '<td><a class="tick" href="/filings?ticker='+encodeURIComponent(h.symbol)+'" title="Offering check for '+esc(h.symbol)+'">'+esc(h.symbol)+'</a>'+seqTag(h.seq)+
+              (h.name?'<div class="dim" style="font-size:11px;max-width:16ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(h.name)+'</div>':'')+
+              dirTag(h)+'</td>'+
+            '<td>'+storyCell(h)+'</td>'+
+            '<td class="num">'+floatCell(FLOATS[h.symbol])+'</td>'+
+            '<td><span class="code '+sev(h.code)+'" title="'+esc(label(h.code)+' — '+note(h.code))+'">'+esc(h.code||'?')+'</span></td>'+
+            '<td>'+(open?'<span class="halted-now live">Halted</span>':'<span class="num">'+esc(clock(h.resumed_at))+'</span>')+'</td>'+
+            '<td class="num">'+pct(h.gap_pct)+'</td>'+
+            '<td class="num">'+pct(h.move_15m)+'</td>'+
+            '<td class="num">'+pct(h.move_60m)+'</td>'+
+          '</tr>';
+        }).join('')+'</tbody></table>';
+    }
+    renderProof(st);
+    renderDirection(st);
+  }
+
+  // The argument for the page, in two rows. If these do not separate, the
+  // filter above is hiding good trades and should be turned off.
+  function renderProof(st){
+    var bn=st.by_news||{}, b=bn.backed, s=bn.silent;
+    if(!b && !s){ proofpanel.style.display='none'; return; }
+    proofpanel.style.display='';
+    function row(cls, title, sub, x){
+      if(!x) return '<tr class="'+cls+'"><td><b>'+title+'</b><span>'+sub+'</span></td><td class="num dim" colspan="5">none measured yet</td></tr>';
+      var thin = x.n<10 ? ' <span class="dim">(too few)</span>' : '';
+      return '<tr class="'+cls+'"><td><b>'+title+'</b><span>'+sub+'</span></td>'+
+        '<td class="num">'+x.n+thin+'</td>'+
+        '<td class="num">'+pct(x.median_gap)+'</td>'+
+        '<td class="num">'+x.gapped_up_pct.toFixed(0)+'%</td>'+
+        '<td class="num">'+pct(x.median_move_60m)+'</td>'+
+        '<td class="num">'+(x.continued_pct==null?'<span class="dim">—</span>':x.continued_pct.toFixed(0)+'% <span class="dim">n='+x.follow_n+'</span>')+'</td></tr>';
+    }
+    proof.innerHTML='<table class="proof"><thead><tr><th>Halt</th><th class="num">N</th>'+
+      '<th class="num">Median gap</th><th class="num">Gapped up</th><th class="num">Reopen → +60m</th><th class="num">Kept going</th></tr></thead><tbody>'+
+      row('backed','News-backed','a Big News headline on the ticker around the halt', b)+
+      row('silent','Silent','no headline behind it', s)+
+      '</tbody></table>'+
+      '<div class="empty" style="padding:12px 14px;font-size:12px">The claim behind this page is that halts with a '+
+      'story behave differently from halts without one. This table is where that claim gets checked. '+
+      '<b>Reopen → +60m</b> is the signed median for buying the reopening print and holding an hour. '+
+      (st.news_unchecked?st.news_unchecked+' recent halt(s) not yet checked for a headline.':'')+'</div>';
   }
 
   function renderDirection(st){
     var bd=st.by_direction||{}, bs=st.by_direction_seq||{};
-    var any=(bd.up||bd.down);
-    if(!any){ dirpanel.style.display='none'; return; }
+    if(!(bd.up||bd.down)){ dirpanel.style.display='none'; return; }
     dirpanel.style.display='';
-    // Short on purpose: on a phone this column is what decides whether the
-    // table fits, and "1st halt of the day" wrapped onto six lines.
     var order=[['up','1','▲ 1st halt of day'],['up','2','▲ 2nd halt'],['up','3+','▲ 3rd halt or later'],
                ['down','1','▼ 1st halt of day'],['down','2','▼ 2nd halt'],['down','3+','▼ 3rd halt or later']];
     function row(labelHtml, s, cls){
@@ -314,184 +434,38 @@
         '<td class="num">'+pct(s.median_gap)+'</td>'+
         '<td class="num">'+s.gapped_up_pct.toFixed(0)+'%</td>'+
         '<td class="num">'+pct(s.median_move_60m)+'</td>'+
-        '<td class="num">'+(s.continued_pct==null?'<span class="dim">—</span>'
-          :s.continued_pct.toFixed(0)+'% <span class="dim">n='+s.follow_n+'</span>')+'</td></tr>';
+        '<td class="num">'+(s.continued_pct==null?'<span class="dim">—</span>':s.continued_pct.toFixed(0)+'% <span class="dim">n='+s.follow_n+'</span>')+'</td></tr>';
     }
-    var html='<table><thead><tr><th>Halt</th><th class="num">N</th>'+
-      '<th class="num">Median gap</th><th class="num">Gapped up</th>'+
-      '<th class="num">Reopen → +60m</th><th class="num">Kept going</th></tr></thead><tbody>'+
+    dirrate.innerHTML='<table><thead><tr><th>Halt</th><th class="num">N</th>'+
+      '<th class="num">Median gap</th><th class="num">Gapped up</th><th class="num">Reopen → +60m</th><th class="num">Kept going</th></tr></thead><tbody>'+
       row('<b>▲ All up-halts</b>', bd.up, 'total')+
-      order.filter(function(o){return o[0]==='up';}).map(function(o){
-        return row('<span class="dim">&nbsp;&nbsp;</span>'+esc(o[2]), (bs.up||{})[o[1]], ''); }).join('')+
+      order.filter(function(o){return o[0]==='up';}).map(function(o){ return row('<span class="dim">&nbsp;&nbsp;</span>'+esc(o[2]), (bs.up||{})[o[1]], ''); }).join('')+
       row('<b>▼ All down-halts</b>', bd.down, 'total')+
-      order.filter(function(o){return o[0]==='down';}).map(function(o){
-        return row('<span class="dim">&nbsp;&nbsp;</span>'+esc(o[2]), (bs.down||{})[o[1]], ''); }).join('')+
+      order.filter(function(o){return o[0]==='down';}).map(function(o){ return row('<span class="dim">&nbsp;&nbsp;</span>'+esc(o[2]), (bs.down||{})[o[1]], ''); }).join('')+
       '</tbody></table>'+
-      '<div class="empty" style="padding:12px 14px;font-size:12px">'+
-      '“Up-halt” means the stock had risen at least 1% in the 15 minutes before the halt; '+
-      '“down-halt” means it had fallen at least 1%. <b>Gapped up</b> is how often the reopening '+
-      'print was above the pre-halt price — for a down-halt, that is a bounce. <b>Reopen → +60m</b> '+
-      'is the signed median move for someone who bought the reopening print and held an hour. '+
-      (st.direction_unknown?st.direction_unknown+' measured halt(s) have no direction yet; older ones are filled in a few per pass.':'')+
-      '</div>';
-    dirrate.innerHTML=html;
+      '<div class="empty" style="padding:12px 14px;font-size:12px">News-backed halts only. “Up-halt” means the stock had risen at least 1% in the '+
+      '15 minutes before the halt; for a down-halt, a green gap is a bounce. '+
+      (st.direction_unknown?st.direction_unknown+' measured halt(s) have no direction yet.':'')+'</div>';
   }
 
-  var FLOATS={};
-  function shares(v){
-    if(v==null||isNaN(v)) return '—';
-    var n=+v;
-    if(n>=1e9) return (n/1e9).toFixed(2)+'B';
-    if(n>=1e6) return (n/1e6).toFixed(n<10e6?2:1)+'M';
-    if(n>=1e3) return (n/1e3).toFixed(0)+'K';
-    return String(Math.round(n));
-  }
-  // Outstanding is shown when float is unknown, but LABELLED: it is an upper
-  // bound on float, and passing it off as the float would make a 4M-float
-  // name with 30M outstanding look like it cannot run.
-  function floatCell(f){
-    if(!f) return '<span class="dim" title="Looked up a few per minute for today\'s halts">…</span>';
-    var v=f.is_float?f.float_shares:f.outstanding;
-    return '<span class="fl '+esc(f.tier||'')+'" title="'+esc(f.tier_note||'')+'">'+shares(v)+
-      '<span class="sub">'+(f.is_float?'float':'outstanding')+'</span></span>';
-  }
-  function render(d){
-    var st=d.stats||{}, w=d.watcher||{}, rows=d.halts||[];
-    // Merge, never replace: a float the reader just looked up by hand must
-    // not vanish when the next poll arrives without it.
-    var fl=d.floats||{};
-    Object.keys(fl).forEach(function(k){ FLOATS[k]=fl[k]; });
-    renderDirection(st);
-    CODES=d.codes||CODES;
-    CODE_ORDER=d.code_order||CODE_ORDER;
-    var o=st.overall;
-
-    hero.innerHTML =
-      stat('Halted right now', nnum(st.open),
-           st.open ? 'not yet reopened' : 'nothing halted')+
-      stat('Halts seen', nnum(st.total), 'last '+(st.days||30)+' days')+
-      stat('Median gap', o ? (o.median_gap>0?'+':'')+o.median_gap.toFixed(2)+'%' : '—',
-           o ? 'across '+o.n+' measured reopens' : 'nothing measured yet')+
-      stat('Gapped up', o ? o.gapped_up_pct.toFixed(0)+'%' : '—',
-           o ? '50% = a coin flip' : 'needs graded halts')+
-      stat('Feed', w.last_poll ? 'live' : 'starting…',
-           w.last_error ? esc(String(w.last_error).slice(0,60))
-             : (w.last_poll ? 'checked '+clock(w.last_poll) : 'no poll yet'), 'text');
-
-    // Filters built from codes actually seen, so no chip is a dead end.
-    var counts=st.counts||{};
-    filters.innerHTML='<button class="chip'+(mode?'':' on')+'" data-code="">All halts</button>'+
-      '<button class="chip'+(mode==='__open'?' on':'')+'" data-code="__open">Still halted</button>'+
-      '<button class="chip'+(mode==='__up'?' on':'')+'" data-code="__up">▲ Up-halts</button>'+
-      '<button class="chip'+(mode==='__down'?' on':'')+'" data-code="__down">▼ Down-halts</button>'+
-      Object.keys(counts).map(function(c){
-        return '<button class="chip'+(mode===c?' on':'')+'" data-code="'+esc(c)+'">'+
-               esc(c)+' ('+counts[c]+')</button>';
-      }).join('');
-
-    var shown=rows;
-    if(mode==='__open') shown=rows.filter(function(h){ return !h.resumed_at; });
-    else if(mode==='__up') shown=rows.filter(function(h){ return h.direction==='up'; });
-    else if(mode==='__down') shown=rows.filter(function(h){ return h.direction==='down'; });
-    else if(mode) shown=rows.filter(function(h){ return (h.code||'')===mode; });
-    count.textContent=shown.length+' shown';
-
-    if(!shown.length){
-      tablewrap.innerHTML='<div class="empty">'+(rows.length
-        ? '<b>Nothing under that filter.</b><br>Clear it to see the rest.'
-        : '<b>No halts recorded yet.</b><br>This fills from Nasdaq’s feed within a minute '+
-          'of the next halt. Outside market hours an empty table is normal.')+'</div>';
-      return;
-    }
-
-    tablewrap.innerHTML='<table><thead><tr>'+
-      '<th>Halted</th><th>Symbol</th><th class="num">Float</th><th>Code</th><th>What it means</th>'+
-      '<th>Resumed</th><th class="num">Band</th><th class="num">Gap</th>'+
-      '<th class="num">+15m</th><th class="num">+60m</th>'+
-      '</tr></thead><tbody>'+
-      shown.map(function(h){
-        var open=!h.resumed_at;
-        return '<tr>'+
-          '<td class="num">'+esc(clock(h.halted_at))+
-            '<div class="dim" style="font-size:11px">'+esc(day(h.halted_at))+'</div></td>'+
-          '<td><a class="tick" href="/filings?ticker='+encodeURIComponent(h.symbol)+'" title="Offering check for '+esc(h.symbol)+' on the SEC Filings tab">'+esc(h.symbol)+'</a>'+seqTag(h.seq)+
-            (h.name?'<div class="dim" style="font-size:11px;max-width:16ch;overflow:hidden;'+
-              'text-overflow:ellipsis;white-space:nowrap">'+esc(h.name)+'</div>':'')+
-            dirTag(h)+'</td>'+
-          '<td class="num">'+floatCell(FLOATS[h.symbol])+'</td>'+
-          '<td><span class="code '+sev(h.code)+'">'+esc(h.code||'?')+'</span></td>'+
-          '<td class="meaning"><b>'+esc(label(h.code))+'</b>'+
-            '<span>'+esc(note(h.code))+'</span></td>'+
-          '<td>'+(open?'<span class="halted-now live">Halted</span>'
-                      :'<span class="num">'+esc(clock(h.resumed_at))+'</span>')+'</td>'+
-          '<td class="num">'+money(h.band_price)+'</td>'+
-          '<td class="num">'+pct(h.gap_pct)+'</td>'+
-          '<td class="num">'+pct(h.move_15m)+'</td>'+
-          '<td class="num">'+pct(h.move_60m)+'</td>'+
-        '</tr>';
-      }).join('')+'</tbody></table>';
-
-    // Base rate by code
-    var by=st.by_code||{};
-    var keys=Object.keys(by).filter(function(k){ return by[k]; });
-    if(keys.length){
-      basepanel.style.display='';
-      baserate.innerHTML='<table><thead><tr><th>Code</th><th>Meaning</th>'+
-        '<th class="num">N</th><th class="num">Median gap</th><th class="num">Mean |gap|</th>'+
-        '<th class="num">Gapped up</th><th class="num">Over 10%</th>'+
-        '<th class="num">Kept going</th></tr></thead><tbody>'+
-        keys.map(function(k){
-          var s=by[k];
-          // A rate over a handful of halts is not a rate. Say so inline rather
-          // than letting a clean-looking percentage pass for a base rate.
-          var thin = s.n<10 ? ' <span class="dim">(too few)</span>' : '';
-          return '<tr><td><span class="code '+sev(k)+'">'+esc(k)+'</span></td>'+
-            '<td class="meaning"><b>'+esc(label(k))+'</b></td>'+
-            '<td class="num">'+s.n+thin+'</td>'+
-            '<td class="num">'+pct(s.median_gap)+'</td>'+
-            '<td class="num">'+s.mean_abs_gap.toFixed(2)+'%</td>'+
-            '<td class="num">'+s.gapped_up_pct.toFixed(0)+'%</td>'+
-            '<td class="num">'+s.over_10pct+'</td>'+
-            '<td class="num">'+(s.continued_pct==null?'<span class="dim">—</span>'
-              :s.continued_pct.toFixed(0)+'% <span class="dim">n='+s.follow_n+'</span>')+'</td>'+
-          '</tr>';
-        }).join('')+'</tbody></table>'+
-        '<div class="empty" style="padding:12px 14px;font-size:12px">'+
-        '“Kept going” is how often the hour after the reopen moved the same way as the gap. '+
-        (st.pending?st.pending+' halt(s) still waiting to be measured.':'')+'</div>';
-    } else { basepanel.style.display='none'; }
-  }
-
-  var CODE_ORDER=[];
   var FAMILY={pause:'Volatility pauses — five minutes, then an auction',
               news:'News halts — a person stopped the tape so information can spread',
               grave:'Trouble — the exchange or the SEC has a question about the company',
               market:'Market-wide — nothing about this stock in particular',
               ipo:'New listings — normal first-day sequence, not distress'};
   function renderGlossary(){
-    // Server order, not alphabetical: JSON keys arrive sorted, which files
-    // T12 between T1 and T2 and breaks the one sequence a reader needs to see
-    // whole. Grouped by family so T1, T2 and T3 sit together under one label.
     var keys=(CODE_ORDER.length?CODE_ORDER:Object.keys(CODES)).filter(function(k){return CODES[k];});
-    if(!keys.length){ glossary.innerHTML='<div class="empty">Loading…</div>'; return; }
-    var order=['pause','news','grave','market','ipo','unknown'];
-    var groups={};
+    if(!keys.length){ glossary.innerHTML=''; return; }
+    var order=['pause','news','grave','market','ipo','unknown'], groups={};
     keys.forEach(function(k){ var f=CODES[k].severity||'unknown'; (groups[f]=groups[f]||[]).push(k); });
-    glossary.innerHTML='<table class="glossary"><thead><tr><th>Code</th><th>Name</th>'+
-      '<th>What it implies</th></tr></thead><tbody>'+
+    glossary.innerHTML='<table class="glossary"><thead><tr><th>Code</th><th>Name</th><th>What it implies</th></tr></thead><tbody>'+
       order.filter(function(f){return groups[f];}).map(function(f){
         return '<tr class="group"><td colspan="3">'+esc(FAMILY[f]||f)+'</td></tr>'+
           groups[f].map(function(k){
             return '<tr><td><span class="code '+CODES[k].severity+'">'+esc(k)+'</span></td>'+
-              '<td><b>'+esc(CODES[k].label)+'</b></td>'+
-              '<td class="dim">'+esc(CODES[k].note)+'</td></tr>';
+              '<td><b>'+esc(CODES[k].label)+'</b></td><td class="dim">'+esc(CODES[k].note)+'</td></tr>';
           }).join('');
       }).join('')+'</tbody></table>';
-  }
-
-  function stat(k,v,n,cls){
-    return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v '+(cls||'')+'">'+v+
-           '</div><div class="n">'+n+'</div></div>';
   }
 
   function markScrollables(){
@@ -509,26 +483,22 @@
   window.addEventListener('resize', markScrollables);
 
   function load(){
-    fetch('/api/halts')
-      .then(function(r){return r.json();})
+    fetch('/api/halts'+(showAll?'?all=1':''))
+      .then(function(r){ return r.json(); })
       .then(function(d){
         if(d.error){ tablewrap.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
         lastData=d; render(d); renderGlossary(); markScrollables();
       })
       .catch(function(){ tablewrap.innerHTML='<div class="empty">Could not load the halt feed.</div>'; });
   }
-
-  // Filtering is a narrowing of rows already held, so it costs no round trip.
-  document.addEventListener('click', function(e){
-    var c=e.target.closest('.chip');
-    if(!c || !c.hasAttribute('data-code')) return;
-    mode=c.getAttribute('data-code');
+  filters.addEventListener('click', function(e){
+    var b=e.target.closest('.chip'); if(!b) return;
+    var m=b.getAttribute('data-mode');
+    if(m==='__all'){ showAll=!showAll; load(); return; }
+    mode=m;
     if(lastData){ render(lastData); markScrollables(); }
   });
-
   load();
-  // Halts arrive in bursts and the feed is small, so a short refresh is cheap
-  // and this is the page someone leaves open during the session.
   setInterval(load, 30000);
 })();
 </script>

@@ -196,6 +196,43 @@ def parse_feed(xml_text):
     return out
 
 
+# --- the story behind the halt --------------------------------------------
+# A halt with a Big News headline on the same ticker around the same time has
+# a reason. A halt without one is price moving on air, and most halts are
+# that. The window is deliberately asymmetric: the catalyst usually lands
+# before the halt (pre-market news, a 9:31 halt), sometimes hours before; the
+# wire's own write-up of the halt lands a few minutes after it.
+NEWS_BEFORE_MINUTES = 240
+NEWS_AFTER_MINUTES = 30
+NEWS_RECHECK_HOURS = 3        # how long a young halt keeps being re-checked
+MAX_NEWS_CHECKS = 80
+
+
+def attach_news(store, log=print, since_hours=NEWS_RECHECK_HOURS, limit=MAX_NEWS_CHECKS):
+    """Find the headline behind recent halts. Cheap: one indexed query per
+    halt, and only for halts that do not already have a Big News match."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+    rows = store.halts_needing_news(since, limit=limit)
+    found = 0
+    for h in rows:
+        try:
+            t = datetime.fromisoformat(str(h["halted_at"]).replace("Z", "+00:00"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+        except ValueError:
+            store.set_halt_news(h["halt_key"], None)
+            continue
+        hit = store.best_headline_for(
+            h["symbol"],
+            (t - timedelta(minutes=NEWS_BEFORE_MINUTES)).astimezone(timezone.utc).isoformat(),
+            (t + timedelta(minutes=NEWS_AFTER_MINUTES)).astimezone(timezone.utc).isoformat())
+        store.set_halt_news(h["halt_key"], hit)
+        if hit and (hit.get("importance") or 0) >= store.BIG_NEWS_MIN:
+            found += 1
+            log(f"halts: {h['symbol']} is news-backed — {str(hit.get('headline'))[:90]}")
+    return found
+
+
 # --- polling ----------------------------------------------------------------
 
 def poll_once(store, log=print):
@@ -239,6 +276,10 @@ def poll_once(store, log=print):
         log(f"halts: {stored} new, {updated} resumption(s) filled in"
             + ("" if _primed[0] else " -- first pass"))
     _primed[0] = True
+    try:
+        attach_news(store, log=log)
+    except Exception as e:
+        log(f"halts: news match skipped ({e})")
     # Float for today's names, a few per pass, so it is on the page by the
     # time a reader looks. Still-halted first: those are the ones being
     # decided on right now.
@@ -263,6 +304,11 @@ def start(store, log=print):
 
     def loop():
         time.sleep(12)
+        try:
+            n = attach_news(store, log=lambda m: None, since_hours=24 * 30, limit=2000)
+            log(f"halts: news-backed check over the archive found {n} halt(s) with a story")
+        except Exception as e:
+            log(f"halts: archive news check skipped ({e})")
         while True:
             try:
                 poll_once(store, log=log)
