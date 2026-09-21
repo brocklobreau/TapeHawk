@@ -6,8 +6,8 @@
 <title>Tapehawk — scoreboard</title>
 <style>
   :root {
-    --bg:#060907; --surface:#0C110E; --surface-2:#121A15; --line:#1D2A22;
-    --ink:#E4EFE7; --muted:#8CA394; --faint:#587364;
+    --bg:#050505; --surface:#0E0E0E; --surface-2:#171717; --line:#262626;
+    --ink:#EDEDED; --muted:#9C9C9C; --faint:#6A6A6A;
     --accent:#2EE86A; --good:#5DD98A; --bad:#F04A4A;
     --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
@@ -16,7 +16,7 @@
   body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
          font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
   a { color:inherit; }
-  header { position:sticky; top:0; z-index:20; background:rgba(6,9,7,.94);
+  header { position:sticky; top:0; z-index:20; background:rgba(5,5,5,.94);
            backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
            padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
   .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
@@ -73,7 +73,7 @@
   .hwrap { position:relative; }
   .hwrap::after { content:''; position:absolute; top:0; bottom:0; right:0;
     width:34px; pointer-events:none; opacity:0; transition:opacity .18s;
-    background:linear-gradient(to right, rgba(12,17,14,0), var(--surface));
+    background:linear-gradient(to right, rgba(14,14,14,0), var(--surface));
     border-radius:0 11px 11px 0; }
   .hwrap.more::after { opacity:1; }
   @media (prefers-reduced-motion:reduce){ .hwrap::after { transition:none; } }
@@ -98,7 +98,7 @@
      of the list. */
   .vwrap::after { content:''; position:absolute; left:0; right:0; bottom:0;
     height:42px; pointer-events:none; opacity:0; transition:opacity .18s;
-    background:linear-gradient(to bottom, rgba(12,17,14,0), var(--surface));
+    background:linear-gradient(to bottom, rgba(14,14,14,0), var(--surface));
     border-radius:0 0 11px 11px; }
   .vwrap.more::after { opacity:1; }
   @media (prefers-reduced-motion:reduce){ .vwrap::after { transition:none; } }
