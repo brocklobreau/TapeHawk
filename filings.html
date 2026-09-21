@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tapehawk — SEC filings</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230B0D10'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%23FFB020'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23060907'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%232EE86A'/%3E%3C/svg%3E">
 <style>
   :root {
-    --bg:#0B0D10; --surface:#12161B; --surface-2:#181D24; --line:#232A33;
-    --ink:#E8EAED; --muted:#8B94A0; --faint:#5A626C;
-    --accent:#FFB020; --good:#3FBF5F; --bad:#F04A4A;
+    --bg:#060907; --surface:#0C110E; --surface-2:#121A15; --line:#1D2A22;
+    --ink:#E4EFE7; --muted:#8CA394; --faint:#587364;
+    --accent:#2EE86A; --good:#5DD98A; --bad:#F04A4A;
     --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   }
@@ -17,7 +17,7 @@
   body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
          font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
   a { color:inherit; }
-  header { position:sticky; top:0; z-index:20; background:rgba(11,13,16,.94);
+  header { position:sticky; top:0; z-index:20; background:rgba(6,9,7,.94);
            backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
            padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
   .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
@@ -73,7 +73,7 @@
   .badge { font-size:10.5px; font-weight:700; padding:2px 6px; border-radius:4px;
            text-transform:uppercase; white-space:nowrap; display:inline-block; }
   a:has(> .badge), td a { text-decoration:none; }
-  .badge.new { background:rgba(255,176,32,.16); color:var(--accent); }
+  .badge.new { background:rgba(46,232,106,.16); color:var(--accent); }
   .badge.amend { background:var(--surface-2); color:var(--muted); }
   /* The offering check. Verdict lines first, worst first, then the filings
      behind them -- a reader with five minutes reads the top line and stops. */
@@ -82,7 +82,7 @@
     border:1px solid var(--line); border-radius:7px; padding:9px 12px; font-size:15px;
     font-family:var(--mono); text-transform:uppercase; letter-spacing:.04em; }
   .ofform input:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
-  .ofform button { background:var(--accent); color:#1a1205; border:0; border-radius:7px;
+  .ofform button { background:var(--accent); color:#04160A; border:0; border-radius:7px;
     padding:9px 16px; font-weight:700; font-size:14px; cursor:pointer; }
   .ofout { margin-top:12px; }
   .ofout .who { font-size:13px; color:var(--muted); margin-bottom:8px; }
@@ -92,9 +92,9 @@
     border:1px solid var(--line); background:var(--surface-2); }
   .verdict li.red { border-color:rgba(240,74,74,.45); background:rgba(240,74,74,.08); }
   .verdict li.red::before { content:'RED FLAG  '; font-weight:700; font-size:10.5px; letter-spacing:.06em; color:var(--bad); }
-  .verdict li.amber { border-color:rgba(255,176,32,.4); background:rgba(255,176,32,.07); }
+  .verdict li.amber { border-color:rgba(46,232,106,.4); background:rgba(46,232,106,.07); }
   .verdict li.amber::before { content:'CAUTION  '; font-weight:700; font-size:10.5px; letter-spacing:.06em; color:var(--accent); }
-  .verdict li.clear { border-color:rgba(63,191,95,.35); background:rgba(63,191,95,.07); }
+  .verdict li.clear { border-color:rgba(93,217,138,.35); background:rgba(93,217,138,.07); }
   .verdict li.clear::before { content:'NOTHING FOUND  '; font-weight:700; font-size:10.5px; letter-spacing:.06em; color:var(--good); }
   .oflist { width:100%; border-collapse:collapse; font-size:12.5px; }
   .oflist th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em;
@@ -112,7 +112,7 @@
              flex-wrap:wrap; }
   .chip { font-size:12px; padding:5px 11px; border-radius:99px; cursor:pointer;
           background:var(--surface-2); border:1px solid var(--line); color:var(--muted); }
-  .chip.on { background:var(--accent); color:#1a1205; border-color:var(--accent);
+  .chip.on { background:var(--accent); color:#04160A; border-color:var(--accent);
              font-weight:650; }
   .sec { font-size:15px; margin:26px 0 10px; display:flex; align-items:baseline;
          gap:9px; flex-wrap:wrap; }
@@ -123,18 +123,18 @@
               border:1px solid var(--line); margin:1px 0; }
   .item-tag.negative { background:rgba(240,74,74,.13); color:#FF8A8A;
                        border-color:rgba(240,74,74,.28); }
-  .item-tag.positive { background:rgba(63,191,95,.13); color:#7FE09A;
-                       border-color:rgba(63,191,95,.28); }
+  .item-tag.positive { background:rgba(93,217,138,.13); color:#8FF0B0;
+                       border-color:rgba(93,217,138,.28); }
   .dir { font-size:10.5px; font-weight:700; padding:2px 6px; border-radius:4px;
          text-transform:uppercase; white-space:nowrap; }
   .dir.negative { background:rgba(240,74,74,.16); color:var(--bad); }
-  .dir.positive { background:rgba(63,191,95,.16); color:var(--good); }
+  .dir.positive { background:rgba(93,217,138,.16); color:var(--good); }
   .dir.unclear  { background:var(--surface-2); color:var(--muted); }
   .dir-neg { color:var(--bad); font-weight:700; }
   .dir-pos { color:var(--good); font-weight:700; }
   .uncov { color:var(--accent); font-weight:700; }
   .uncov-tag { font-size:10.5px; font-weight:700; padding:2px 6px; border-radius:4px;
-               background:rgba(255,176,32,.16); color:var(--accent);
+               background:rgba(46,232,106,.16); color:var(--accent);
                text-transform:uppercase; white-space:nowrap; }
   .covered { font-size:11.5px; color:var(--faint); }
   .warn { margin:0 0 16px; padding:11px 13px; border-radius:9px; font-size:12.5px;
@@ -150,6 +150,7 @@
     <a class="tab" href="/">Live</a>
     <a class="tab" href="/halts">Halts</a>
     <a class="tab on" href="/filings">SEC Filings</a>
+    <a class="tab" href="/gems">Hidden Gems</a>
     <a class="tab" href="/scoreboard">Scoreboard</a>
   </nav>
   <div class="spacer"></div>

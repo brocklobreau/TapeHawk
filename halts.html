@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tapehawk — trading halts</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230B0D10'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%23FFB020'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23060907'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%232EE86A'/%3E%3C/svg%3E">
 <style>
   :root {
-    --bg:#0B0D10; --surface:#12161B; --surface-2:#181D24; --line:#232A33;
-    --ink:#E8EAED; --muted:#8B94A0; --faint:#5A626C;
-    --accent:#FFB020; --good:#3FBF5F; --bad:#F04A4A; --live:#2BD67B;
+    --bg:#060907; --surface:#0C110E; --surface-2:#121A15; --line:#1D2A22;
+    --ink:#E4EFE7; --muted:#8CA394; --faint:#587364;
+    --accent:#2EE86A; --good:#5DD98A; --bad:#F04A4A; --live:#2EE86A;
     --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   }
@@ -17,7 +17,7 @@
   body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
          font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
   a { color:inherit; }
-  header { position:sticky; top:0; z-index:20; background:rgba(11,13,16,.94);
+  header { position:sticky; top:0; z-index:20; background:rgba(6,9,7,.94);
            backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
            padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
   .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
@@ -72,23 +72,23 @@
   .code { font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:.03em;
           padding:3px 7px; border-radius:4px; white-space:nowrap; display:inline-block;
           background:var(--surface-2); border:1px solid var(--line); color:var(--muted); }
-  .code.pause  { background:rgba(255,176,32,.14); color:var(--accent);
-                 border-color:rgba(255,176,32,.32); }
+  .code.pause  { background:rgba(46,232,106,.14); color:var(--accent);
+                 border-color:rgba(46,232,106,.32); }
   .code.news   { background:rgba(90,150,255,.14); color:#7FB0FF;
                  border-color:rgba(90,150,255,.3); }
   .code.grave  { background:rgba(240,74,74,.16); color:var(--bad);
                  border-color:rgba(240,74,74,.34); }
   .code.market { background:rgba(200,120,255,.13); color:#C79BFF;
                  border-color:rgba(200,120,255,.3); }
-  .code.ipo    { background:rgba(63,191,95,.13); color:var(--good);
-                 border-color:rgba(63,191,95,.3); }
+  .code.ipo    { background:rgba(93,217,138,.13); color:var(--good);
+                 border-color:rgba(93,217,138,.3); }
   .code.unknown { border-style:dashed; }
   /* Which way it was moving into the halt, and how many times it has halted
      today. Both sit under the symbol because they are properties of the
      halt, not of the code. */
   .dir { font-family:var(--mono); font-size:11px; font-weight:700; padding:1px 6px;
          border-radius:4px; display:inline-block; margin-top:3px; }
-  .dir.up   { background:rgba(63,191,95,.13); color:var(--good); }
+  .dir.up   { background:rgba(93,217,138,.13); color:var(--good); }
   .dir.down { background:rgba(240,74,74,.14); color:var(--bad); }
   .dir.flat, .dir.unknown { background:var(--surface-2); color:var(--faint); }
   .seq { font-family:var(--mono); font-size:11px; color:var(--muted); margin-left:5px; white-space:nowrap; }
@@ -120,20 +120,20 @@
              flex-wrap:wrap; }
   .chip { font-size:12px; padding:5px 11px; border-radius:99px; cursor:pointer;
           background:var(--surface-2); border:1px solid var(--line); color:var(--muted); }
-  .chip.on { background:var(--accent); color:#1a1205; border-color:var(--accent); font-weight:650; }
+  .chip.on { background:var(--accent); color:#04160A; border-color:var(--accent); font-weight:650; }
 
   .vwrap { position:relative; }
   .vscroll { max-height:clamp(300px, 58vh, 680px); overflow:auto; overscroll-behavior:contain;
-             scrollbar-width:thin; scrollbar-color:rgba(255,176,32,.45) transparent; }
+             scrollbar-width:thin; scrollbar-color:rgba(46,232,106,.45) transparent; }
   .vscroll::-webkit-scrollbar { width:9px; height:9px; }
   .vscroll::-webkit-scrollbar-track { background:transparent; }
-  .vscroll::-webkit-scrollbar-thumb { background:rgba(255,176,32,.38); border-radius:99px;
+  .vscroll::-webkit-scrollbar-thumb { background:rgba(46,232,106,.38); border-radius:99px;
     border:2px solid var(--surface); }
   /* Chrome's overlay scrollbars have zero layout width and show only while you
      scroll, so the bar alone cannot say there is more below. */
   .vwrap::after { content:''; position:absolute; left:0; right:0; bottom:0; height:42px;
     pointer-events:none; opacity:0; transition:opacity .18s;
-    background:linear-gradient(to bottom, rgba(18,22,27,0), var(--surface));
+    background:linear-gradient(to bottom, rgba(12,17,14,0), var(--surface));
     border-radius:0 0 11px 11px; }
   .vwrap.more::after { opacity:1; }
   /* Same trap sideways. On a phone every table here is wider than the screen
@@ -142,7 +142,7 @@
      they exist. */
   .vwrap::before { content:''; position:absolute; top:0; bottom:0; right:0; width:34px;
     pointer-events:none; opacity:0; transition:opacity .18s; z-index:1;
-    background:linear-gradient(to right, rgba(18,22,27,0), var(--surface));
+    background:linear-gradient(to right, rgba(12,17,14,0), var(--surface));
     border-radius:0 11px 11px 0; }
   .vwrap.more-x::before { opacity:1; }
   @media (prefers-reduced-motion:reduce){ .vwrap::after, .vwrap::before { transition:none; } }
@@ -167,7 +167,7 @@
   .story a:hover { color:var(--accent); }
   .story .when { display:block; font-family:var(--mono); font-size:10.5px; color:var(--faint); margin-top:3px; }
   .story .imp { font-family:var(--mono); font-size:10px; font-weight:700; padding:1px 5px; border-radius:4px;
-                background:rgba(255,176,32,.16); color:var(--accent); margin-right:5px; vertical-align:1px; }
+                background:rgba(46,232,106,.16); color:var(--accent); margin-right:5px; vertical-align:1px; }
   tr.silent td { opacity:.55; }
   tr.silent .story { color:var(--faint); font-style:italic; }
   /* Proof table: two rows, the whole argument for the page in one glance. */
@@ -190,6 +190,7 @@
     <a class="tab" href="/">Live</a>
     <a class="tab on" href="/halts">Halts</a>
     <a class="tab" href="/filings">SEC Filings</a>
+    <a class="tab" href="/gems">Hidden Gems</a>
     <a class="tab" href="/scoreboard">Scoreboard</a>
   </nav>
   <div class="spacer"></div>

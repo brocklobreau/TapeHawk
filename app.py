@@ -25,6 +25,7 @@ from flask import Flask, Response, redirect, request, send_from_directory
 import earnings
 import filings
 import floats
+import gems
 import halts
 import offerings
 import news_stream
@@ -285,6 +286,22 @@ def api_filings():
         return {"error": "Could not read the filings."}, 500
 
 
+@app.route("/gems")
+def gems_page():
+    return send_from_directory(HERE, "gems.html")
+
+
+@app.route("/api/gems")
+def api_gems():
+    # Memory only. The background pass does the fetching; this returns what it
+    # last found, in the time it takes to serialise it.
+    try:
+        return gems.snapshot()
+    except Exception as e:
+        log(f"gems page failed: {e}")
+        return {"error": "Could not read the gems list."}, 500
+
+
 @app.route("/scoreboard")
 def scoreboard_page():
     return send_from_directory(HERE, "scoreboard.html")
@@ -308,6 +325,7 @@ def api_status():
     return {"stream": news_stream.status(), "store": store.stats(),
             "filings": filings.status(), "halts": halts.status(),
             "floats": floats.status(), "offerings": offerings.status(),
+            "gems": gems.status(),
             "now": datetime.now(timezone.utc).isoformat()}
 
 
@@ -400,6 +418,10 @@ def start_once():
             halts.start(store, log=log)
         except Exception as e:
             log(f"halt watcher failed to start (non-fatal): {e}")
+        try:
+            gems.start(log=log)
+        except Exception as e:
+            log(f"gems watcher failed to start (non-fatal): {e}")
         log("tapehawk: started")
 
 

@@ -6,12 +6,12 @@
 <title>Tapehawk — live market headlines</title>
 <!-- Inline so it costs no request. Without it every first page load spends a
      round trip on /favicon.ico and logs a 404. -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230B0D10'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%23FFB020'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23060907'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%232EE86A'/%3E%3C/svg%3E">
 <style>
   :root {
-    --bg:#0B0D10; --surface:#12161B; --surface-2:#181D24; --line:#232A33;
-    --ink:#E8EAED; --muted:#8B94A0; --faint:#5A626C;
-    --accent:#FFB020; --good:#3FBF5F; --bad:#F04A4A; --live:#2BD67B;
+    --bg:#060907; --surface:#0C110E; --surface-2:#121A15; --line:#1D2A22;
+    --ink:#E4EFE7; --muted:#8CA394; --faint:#587364;
+    --accent:#2EE86A; --good:#5DD98A; --bad:#F04A4A; --live:#2EE86A;
     --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   }
@@ -20,7 +20,7 @@
          font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
   a { color:inherit; }
 
-  header { position:sticky; top:0; z-index:20; background:rgba(11,13,16,.94);
+  header { position:sticky; top:0; z-index:20; background:rgba(6,9,7,.94);
            backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
            padding:10px 16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
   .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
@@ -34,10 +34,10 @@
   .tab.on { background:var(--surface-2); border-color:var(--line); color:var(--accent);
             font-weight:600; }
   .dot { width:7px; height:7px; border-radius:50%; background:var(--faint); }
-  .dot.on { background:var(--live); box-shadow:0 0 0 0 rgba(43,214,123,.7);
+  .dot.on { background:var(--live); box-shadow:0 0 0 0 rgba(46,232,106,.7);
             animation:pulse 2.2s infinite; }
   .dot.off { background:var(--bad); }
-  @keyframes pulse { 70%{box-shadow:0 0 0 7px rgba(43,214,123,0);} 100%{box-shadow:0 0 0 0 rgba(43,214,123,0);} }
+  @keyframes pulse { 70%{box-shadow:0 0 0 7px rgba(46,232,106,0);} 100%{box-shadow:0 0 0 0 rgba(46,232,106,0);} }
   @media (prefers-reduced-motion:reduce){ .dot.on{animation:none;} }
   .spacer { flex:1; }
   .search { display:flex; gap:6px; }
@@ -45,7 +45,7 @@
     padding:7px 10px; border-radius:7px; font-family:var(--mono); text-transform:uppercase;
     width:150px; font-size:13px; }
   .search input:focus { outline:2px solid var(--accent); outline-offset:1px; }
-  .search button { background:var(--accent); color:#1a1205; border:0; padding:7px 14px;
+  .search button { background:var(--accent); color:#04160A; border:0; padding:7px 14px;
     border-radius:7px; font-weight:650; cursor:pointer; font-size:13px; }
 
   .bigwrap { max-width:1500px; margin:16px auto 0; padding:0 16px; }
@@ -67,7 +67,7 @@
     background:var(--surface-2); border:1px solid var(--line); color:var(--muted);
     font-weight:600; user-select:none; }
   .chip:hover { color:var(--ink); }
-  .chip.on { background:var(--accent); border-color:var(--accent); color:#1a1205; }
+  .chip.on { background:var(--accent); border-color:var(--accent); color:#04160A; }
   .chip.symfilter { background:var(--surface-2); border-color:var(--accent);
     color:var(--accent); font-family:var(--mono); }
   .chip.symfilter b { color:var(--ink); margin-left:5px; font-weight:700; }
@@ -77,16 +77,16 @@
   .item { padding:11px 14px; border-bottom:1px solid var(--line); display:block; }
   .item:last-child { border-bottom:0; }
   .item.new { animation:flash 1.6s ease-out; }
-  @keyframes flash { from{background:rgba(255,176,32,.13);} to{background:transparent;} }
+  @keyframes flash { from{background:rgba(46,232,106,.13);} to{background:transparent;} }
   @media (prefers-reduced-motion:reduce){ .item.new{animation:none;} }
   .meta { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:5px; }
   .time { font-family:var(--mono); font-size:11.5px; color:var(--faint); }
   .lat  { font-family:var(--mono); font-size:10.5px; color:var(--live); }
   .tag  { font-size:10.5px; font-weight:700; letter-spacing:.03em; padding:2px 6px;
-          border-radius:4px; background:rgba(255,176,32,.14); color:var(--accent);
+          border-radius:4px; background:rgba(46,232,106,.14); color:var(--accent);
           text-transform:uppercase; }
   .tag.legal { background:rgba(240,74,74,.14); color:var(--bad); }
-  .tag.clinical { background:rgba(63,191,95,.14); color:var(--good); }
+  .tag.clinical { background:rgba(93,217,138,.14); color:var(--good); }
   .sym { font-family:var(--mono); font-size:11.5px; font-weight:700; padding:2px 6px;
          border-radius:4px; background:var(--surface-2); border:1px solid var(--line);
          cursor:pointer; color:var(--ink); }
@@ -99,18 +99,18 @@
   .empty { padding:26px 16px; color:var(--muted); font-size:13.5px; }
 
   .bigwrap { margin-bottom:16px; }
-  .bigwrap .panel { border-color:rgba(255,176,32,.42); }
+  .bigwrap .panel { border-color:rgba(46,232,106,.42); }
   /* Scrollable, with a VISIBLE scrollbar. Bellwether's nav hid its scrollbar
      with scrollbar-width:none and five tabs became invisible on phones --
      a scroll area nobody can tell is scrollable is a scroll area that hides
      content. Thin and dim, but present. */
   #bignews { max-height:min(46vh, 420px); overflow-y:auto; overscroll-behavior:contain;
-             scrollbar-width:thin; scrollbar-color:rgba(255,176,32,.45) transparent; }
+             scrollbar-width:thin; scrollbar-color:rgba(46,232,106,.45) transparent; }
   #bignews::-webkit-scrollbar { width:9px; }
   #bignews::-webkit-scrollbar-track { background:transparent; }
-  #bignews::-webkit-scrollbar-thumb { background:rgba(255,176,32,.38);
+  #bignews::-webkit-scrollbar-thumb { background:rgba(46,232,106,.38);
     border-radius:99px; border:2px solid var(--surface); }
-  #bignews::-webkit-scrollbar-thumb:hover { background:rgba(255,176,32,.62); }
+  #bignews::-webkit-scrollbar-thumb:hover { background:rgba(46,232,106,.62); }
   /* Chrome uses OVERLAY scrollbars: zero layout width, visible only while
      actively scrolling. So the styled bar above cannot be the only signal
      that there is more below -- that is how Bellwether's nav hid five tabs.
@@ -119,12 +119,12 @@
   .bignews-wrap::after {
     content:''; position:absolute; left:0; right:0; bottom:0; height:44px;
     pointer-events:none; opacity:0; transition:opacity .18s;
-    background:linear-gradient(to bottom, rgba(18,22,27,0), var(--surface));
+    background:linear-gradient(to bottom, rgba(12,17,14,0), var(--surface));
     border-radius:0 0 11px 11px; }
   .bignews-wrap.more::after { opacity:1; }
   .count-hint { color:var(--faint); font-weight:400; font-size:11.5px; }
   @media (max-width:980px){ #bignews { max-height:min(52vh, 360px); } }
-  .bigwrap > .panel > h2 { color:var(--accent); border-bottom-color:rgba(255,176,32,.28); }
+  .bigwrap > .panel > h2 { color:var(--accent); border-bottom-color:rgba(46,232,106,.28); }
   .big-item { padding:12px 14px; border-bottom:1px solid var(--line); }
   .big-item:last-child { border-bottom:0; }
   .big-head { font-size:15.5px; line-height:1.4; font-weight:600; }
@@ -133,10 +133,10 @@
   .why { margin-top:6px; font-size:11.5px; color:var(--muted); }
   .why b { color:var(--accent); font-weight:600; }
   .score { font-family:var(--mono); font-size:10.5px; color:var(--accent);
-           border:1px solid rgba(255,176,32,.42); border-radius:4px; padding:1px 5px; }
+           border:1px solid rgba(46,232,106,.42); border-radius:4px; padding:1px 5px; }
   .tone { font-size:10.5px; font-weight:700; letter-spacing:.04em; padding:2px 7px;
           border-radius:4px; text-transform:uppercase; }
-  .tone.positive { background:rgba(63,191,95,.16); color:var(--good); }
+  .tone.positive { background:rgba(93,217,138,.16); color:var(--good); }
   .tone.negative { background:rgba(240,74,74,.16); color:var(--bad); }
   .tone.unclear  { background:var(--surface-2); color:var(--muted); }
   .impact { margin-top:6px; font-size:11.5px; color:var(--muted); line-height:1.5; }
@@ -187,7 +187,7 @@
   /* Earnings day. Given its own card rather than another row in the stats grid
      because it answers a different question from the rest of the panel: not
      "what is this worth" but "what happens when it reports". */
-  .earn { margin:12px 14px; border:1px solid rgba(255,176,32,.3); border-radius:9px;
+  .earn { margin:12px 14px; border:1px solid rgba(46,232,106,.3); border-radius:9px;
           background:var(--surface-2); overflow:hidden; }
   .earn > h4 { margin:0; padding:9px 13px; font-size:11px; text-transform:uppercase;
                letter-spacing:.06em; color:var(--accent); font-weight:650;
@@ -223,6 +223,7 @@
     <a class="tab on" href="/">Live</a>
     <a class="tab" href="/halts">Halts</a>
     <a class="tab" href="/filings">SEC Filings</a>
+    <a class="tab" href="/gems">Hidden Gems</a>
     <a class="tab" href="/scoreboard">Scoreboard</a>
   </nav>
   <div class="live"><span class="dot" id="dot"></span><span id="livetext">connecting…</span></div>
@@ -711,6 +712,9 @@
   }
 
   load(); loadBig(); connect();
+  // /?ticker=XYZ opens the research panel straight away (the gems page links here).
+  var deep=new URLSearchParams(location.search).get('ticker');
+  if(deep) lookup(deep.trim().toUpperCase());
   setInterval(load, 60000);
   setInterval(loadBig, 120000);
   setInterval(function(){

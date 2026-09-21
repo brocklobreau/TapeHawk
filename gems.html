@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapehawk — hidden gems</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23060907'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%232EE86A'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg:#060907; --surface:#0C110E; --surface-2:#121A15; --line:#1D2A22;
+    --ink:#E4EFE7; --muted:#8CA394; --faint:#587364;
+    --accent:#2EE86A; --good:#5DD98A; --bad:#F04A4A; --warn:#FFB020; --live:#2EE86A;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+         font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  a { color:inherit; }
+  header { position:sticky; top:0; z-index:20; background:rgba(6,9,7,.94);
+           backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+           padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
+  .brand span { color:var(--accent); }
+  .tabs { display:flex; gap:4px; flex-wrap:wrap; }
+  .tab { font-size:13px; padding:6px 13px; border-radius:7px; text-decoration:none;
+         color:var(--muted); border:1px solid transparent; }
+  .tab:hover { color:var(--ink); }
+  .tab.on { background:var(--surface-2); border-color:var(--line); color:var(--accent); font-weight:600; }
+  .spacer { flex:1; }
+  .stamp { font-size:12px; color:var(--faint); font-family:var(--mono); }
+
+  .wrap { max-width:1150px; margin:0 auto; padding:18px 16px 40px; }
+  .lede { color:var(--muted); font-size:13.5px; max-width:78ch; margin:0 0 6px; }
+  .lede b { color:var(--ink); }
+  .caveat { color:var(--faint); font-size:12.5px; max-width:78ch; margin:0 0 18px;
+            border-left:2px solid var(--line); padding-left:11px; }
+
+  .hero { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
+  .stat { background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:12px 13px; }
+  .stat .k { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); }
+  .stat .v { font-family:var(--mono); font-size:25px; font-weight:700; margin-top:3px; }
+  .stat .v.text { font-size:15px; font-weight:650; }
+  .stat .n { font-size:11.5px; color:var(--faint); margin-top:2px; }
+
+  .filters { display:flex; gap:6px; margin:0 0 12px; flex-wrap:wrap; align-items:center; }
+  .chip { font-size:12px; padding:5px 11px; border-radius:999px; border:1px solid var(--line);
+          background:var(--surface); color:var(--muted); cursor:pointer; user-select:none; }
+  .chip:hover { color:var(--ink); }
+  .chip.on { background:var(--accent); color:#04160A; border-color:var(--accent); font-weight:650; }
+
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:12px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:11px;
+          padding:13px 14px; display:flex; flex-direction:column; gap:9px; position:relative; }
+  .card.top { border-color:rgba(46,232,106,.45); box-shadow:0 0 0 1px rgba(46,232,106,.12) inset; }
+  .card.ran { opacity:.6; }
+  .row { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  a.tick { font-family:var(--mono); font-size:15px; font-weight:800; text-decoration:none;
+           padding:2px 8px; border-radius:5px; background:var(--surface-2); border:1px solid var(--line); }
+  a.tick:hover { border-color:var(--accent); color:var(--accent); }
+  .name { color:var(--muted); font-size:12.5px; flex:1; min-width:0; overflow:hidden;
+          text-overflow:ellipsis; white-space:nowrap; }
+  .price { font-family:var(--mono); font-weight:700; font-size:15px; }
+  .mv { font-family:var(--mono); font-weight:700; font-size:12.5px; padding:2px 7px; border-radius:4px; }
+  .mv.quiet { background:rgba(46,232,106,.12); color:var(--accent); }
+  .mv.stirring { background:rgba(255,176,32,.14); color:var(--warn); }
+  .mv.ran { background:rgba(240,74,74,.14); color:var(--bad); }
+  .mv small { font-weight:500; opacity:.8; }
+  .hl { font-size:13.5px; line-height:1.4; font-weight:500; }
+  .hl a { text-decoration:none; }
+  .hl a:hover { color:var(--accent); }
+  .meta { font-size:11.5px; color:var(--faint); font-family:var(--mono); display:flex; gap:10px; flex-wrap:wrap; }
+  .facts { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; font-size:12.5px;
+           border-top:1px solid var(--line); padding-top:9px; }
+  .facts .k { color:var(--faint); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; display:block; }
+  .facts .v { font-family:var(--mono); font-weight:600; }
+  .fl.micro { color:#FF6B6B; } .fl.low { color:var(--accent); } .fl.mid { color:var(--ink); } .fl.large { color:var(--muted); }
+  .off.red { color:var(--bad); } .off.amber { color:var(--warn); } .off.clear { color:var(--good); } .off.unknown { color:var(--faint); }
+  .val { font-size:12.5px; border-top:1px solid var(--line); padding-top:9px; }
+  .val b { display:block; font-weight:650; margin-bottom:2px; }
+  .val b.cheap { color:var(--accent); } .val b.trap { color:var(--warn); } .val b.rich { color:var(--bad); }
+  .val ul { margin:0; padding-left:16px; color:var(--muted); }
+  .odds { font-size:12.5px; border-top:1px solid var(--line); padding-top:9px; }
+  .odds .pill { font-family:var(--mono); font-size:11px; font-weight:700; padding:2px 7px; border-radius:4px;
+                text-transform:uppercase; letter-spacing:.04em; margin-right:6px; }
+  .odds .pill.likely { background:rgba(46,232,106,.14); color:var(--accent); }
+  .odds .pill.coinflip { background:rgba(255,176,32,.14); color:var(--warn); }
+  .odds .pill.unlikely { background:rgba(240,74,74,.14); color:var(--bad); }
+  .odds .pill.unknown { background:var(--surface-2); color:var(--faint); }
+  .odds .t { color:var(--muted); }
+  .guard { font-size:12.5px; border-top:1px solid var(--line); padding-top:9px; }
+  .guard b { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); display:block; margin-bottom:3px; }
+  .guard.pass { color:var(--accent); }
+  .guard ul { margin:0; padding-left:16px; color:var(--bad); }
+  .guard ul li { color:var(--ink); }
+  .guard ul li::marker { color:var(--bad); }
+  .why { font-size:11px; color:var(--faint); font-family:var(--mono); }
+  .why span { color:var(--muted); }
+  .rankno { position:absolute; top:10px; right:12px; font-family:var(--mono); font-size:11px; color:var(--faint); }
+  .empty { padding:28px 16px; color:var(--muted); line-height:1.65; background:var(--surface);
+           border:1px solid var(--line); border-radius:11px; }
+  .empty b { color:var(--ink); }
+  h2.sec { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);
+           margin:22px 0 10px; }
+  details.how { margin-top:22px; color:var(--muted); font-size:13px; max-width:80ch; }
+  details.how summary { cursor:pointer; color:var(--ink); font-weight:600; }
+  details.how p { margin:8px 0; }
+  details.how b { color:var(--ink); }
+  @media (max-width:600px) { .wrap { padding:14px 12px 30px; } .cards { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">TAPEHAWK<span>.</span></div>
+  <nav class="tabs">
+    <a class="tab" href="/">Live</a>
+    <a class="tab" href="/halts">Halts</a>
+    <a class="tab" href="/filings">SEC Filings</a>
+    <a class="tab on" href="/gems">Hidden Gems</a>
+    <a class="tab" href="/scoreboard">Scoreboard</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="stamp" id="stamp"></span>
+</header>
+
+<div class="wrap">
+  <p class="lede">The <b>catalyst is out</b> and the <b>price hasn't moved</b>. Every card is a
+    Big News headline from the last few hours, scored positive, on a stock still sitting near the
+    price it had when the story landed — ranked by float, offering risk and how cheap the
+    business looks.</p>
+  <p class="caveat">"Quiet" is measured against the price at the headline, not asserted. A stock
+    can be quiet because nobody has read the story yet, or because everyone has and decided it
+    doesn't matter. The checklist underneath each card is there to tell those apart — read it.</p>
+
+  <div class="hero" id="hero"></div>
+
+  <div class="filters" id="filters">
+    <span class="chip on" data-f="all">All</span>
+    <span class="chip" data-f="quiet">Quiet only</span>
+    <span class="chip" data-f="lowfloat">Low float</span>
+    <span class="chip" data-f="cheap">Looks cheap</span>
+    <span class="chip" data-f="clean">No offering on file</span>
+    <span class="chip" data-f="pass">Passes safeguard</span>
+    <span class="chip" data-f="likely">Usually spikes</span>
+  </div>
+
+  <div class="cards" id="cards"></div>
+  <div id="ranwrap"></div>
+
+  <details class="how">
+    <summary>How a stock gets on this page</summary>
+    <p><b>1. A story.</b> A headline the classifier scored <span id="minimp"></span>+ (the Big News
+      threshold) and read as positive, on a real listed equity, inside the last
+      <span id="lookback"></span> hours.</p>
+    <p><b>2. No move yet.</b> The price at the headline is fixed — the grader's entry bar, or the
+      first bar after the story, or the prior close for overnight news — and the move since is the
+      test. Under ±<span id="quiet"></span>% is <b>quiet</b>. Past <span id="ran"></span>% at any
+      horizon and it's moved to the "already ran" list below: that one is a halt-chase, not a gem.</p>
+    <p><b>3. The checklist.</b> Float tier from the same cache the Halts tab uses; the SEC offering
+      check (shelves, PIPEs, priced deals); and the research panel's valuation read with the
+      specific facts that fed it (P/E, book, sales, analyst target, distance from the 52-week low).</p>
+    <p><b>4. Spike odds.</b> The site's own archive: every Big News headline it has graded in the
+      last <span id="hdays"></span> days in the same category and tone, and how many moved
+      <span id="spike"></span>%+ within the hour. <span id="likely"></span>%+ reads "usually spikes",
+      under <span id="unlikely"></span>% "usually nothing". Fewer than 8 graded stories in the category
+      and it falls back to all big positive stories and says so. It is a base rate, not a prediction.</p>
+    <p><b>5. Safeguard.</b> The reasons not to take it, each a measured fact: an offering or shelf on
+      file, a large float, a value-trap read, a category that usually does nothing, a quiet story older
+      than <span id="stale"></span> hours, or a headline that only just clears the Big News bar. A card
+      that passes every check is a clean setup — not a buy signal.</p>
+    <p><b>6. Rank.</b> Importance, plus points for quiet, low float, value and spike odds, minus points for
+      anything on file at EDGAR or a category that usually does nothing. The reasons are printed on the card. Refreshes every
+      <span id="refresh"></span> seconds in the background — the page never waits on a data feed.</p>
+  </details>
+</div>
+
+<script>
+(function(){
+  var cards=document.getElementById('cards'), hero=document.getElementById('hero'),
+      ranwrap=document.getElementById('ranwrap'), stamp=document.getElementById('stamp');
+  var filter='all', data=null;
+
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function money(v){ if(v==null||isNaN(v))return '—'; var n=+v,a=Math.abs(n);
+    if(a>=1e9)return '$'+(n/1e9).toFixed(2)+'B'; if(a>=1e6)return '$'+(n/1e6).toFixed(1)+'M';
+    return '$'+n.toFixed(2); }
+  function shares(v){ if(v==null||isNaN(v))return '—'; var n=+v;
+    if(n>=1e9)return (n/1e9).toFixed(2)+'B'; if(n>=1e6)return (n/1e6).toFixed(2)+'M';
+    if(n>=1e3)return (n/1e3).toFixed(0)+'K'; return String(n); }
+  function pct(v){ if(v==null||isNaN(v))return '—'; var n=+v; return (n>0?'+':'')+n.toFixed(2)+'%'; }
+  function ago(min){ if(min==null)return ''; if(min<60)return min+'m ago';
+    var h=Math.floor(min/60), m=min%60; return h+'h '+(m?m+'m ':'')+'ago'; }
+  function when(iso){ var d=new Date(iso); if(isNaN(d))return '';
+    return d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}); }
+
+  function passes(g){
+    if(filter==='quiet') return g.status==='quiet';
+    if(filter==='lowfloat') return g.float && (g.float.tier==='micro'||g.float.tier==='low');
+    if(filter==='cheap') return g.value && ((g.value.points||0)>0);
+    if(filter==='clean') return g.offering && g.offering.severity==='clear';
+    if(filter==='pass') return g.passes===true;
+    if(filter==='likely') return g.odds_level==='likely';
+    return true;
+  }
+
+  function oddsWord(l){ return l==='likely'?'usually spikes':l==='coinflip'?'coin flip':l==='unlikely'?'usually nothing':'no history'; }
+  function valClass(read){ if(!read)return ''; if(read.indexOf('Looks cheap')===0)return 'cheap';
+    if(read.indexOf('Cheap multiple')===0)return 'trap'; if(read.indexOf('Looks expensive')===0)return 'rich'; return ''; }
+
+  function card(g, i, dim){
+    var st=g.status, label = st==='quiet' ? (g.waiting_for_open?'quiet · waits for open':'quiet')
+                    : st==='stirring' ? 'stirring' : 'already ran';
+    var fl=g.float, off=g.offering||{}, v=g.value||{};
+    var flHtml = fl && fl.shares!=null
+      ? '<span class="v fl '+esc(fl.tier||'')+'">'+shares(fl.shares)+(fl.is_float?'':' <small>(outstanding)</small>')+'</span>'
+        +'<span class="k">'+esc(fl.tier?fl.tier+' float':'float')+'</span>'
+      : '<span class="v dim">—</span><span class="k">float</span>';
+    return '<div class="card '+(i===0&&!dim?'top':'')+(dim?' ran':'')+'">'+
+      (dim?'':'<span class="rankno">#'+(i+1)+' · score '+esc(g.score)+'</span>')+
+      '<div class="row"><a class="tick" href="/?ticker='+encodeURIComponent(g.symbol)+'">'+esc(g.symbol)+'</a>'+
+        '<span class="name">'+esc(g.name||'')+'</span></div>'+
+      '<div class="row"><span class="price">'+money(g.price)+'</span>'+
+        '<span class="mv '+st+'">'+pct(g.move_pct)+' <small>since story · '+esc(label)+'</small></span>'+
+        (g.day_change_pct!=null?'<span class="meta">day '+pct(g.day_change_pct)+'</span>':'')+'</div>'+
+      '<div class="hl">'+(g.url?'<a href="'+esc(g.url)+'" target="_blank" rel="noopener">':'')+esc(g.headline)+(g.url?'</a>':'')+'</div>'+
+      '<div class="meta"><span>'+esc(when(g.at))+' · '+esc(ago(g.age_min))+'</span>'+
+        (g.source?'<span>'+esc(g.source)+'</span>':'')+
+        '<span>importance '+esc(g.importance)+'</span>'+
+        '<span>from '+money(g.entry)+' ('+esc(g.entry_how||'')+')</span></div>'+
+      (dim ? '' :
+      '<div class="facts">'+
+        '<div>'+flHtml+'</div>'+
+        '<div><span class="v off '+esc(off.severity||'unknown')+'">'+
+          esc(off.severity==='clear'?'Clear':off.severity==='red'?'Offering':off.severity==='amber'?'Shelf / resale':'Unknown')+
+          '</span><span class="k">offering check</span></div>'+
+        '<div><span class="v">'+money(g.market_cap)+'</span><span class="k">market cap</span></div>'+
+        '<div><span class="v">'+(g.year_low!=null?money(g.year_low)+' – '+money(g.year_high):'—')+'</span><span class="k">52-week range</span></div>'+
+      '</div>'+
+      (off.text && off.severity!=='clear' ? '<div class="why" style="color:var(--muted)">'+esc(off.text)+'</div>' : '')+
+      '<div class="val"><b class="'+valClass(v.read)+'">'+esc(v.read||'No valuation read yet')+'</b>'+
+        (v.notes&&v.notes.length?'<ul>'+v.notes.map(function(n){return '<li>'+esc(n)+'</li>';}).join('')+'</ul>':'')+'</div>'+
+      '<div class="odds"><span class="pill '+esc(g.odds_level||'unknown')+'">'+esc(oddsWord(g.odds_level))+'</span>'+
+        '<span class="t">'+esc(g.odds||'')+(g.category_label?' ('+esc(g.category_label)+')':'')+'</span></div>'+
+      (g.passes ? '<div class="guard pass"><b>Safeguard</b>✓ passes every check — still not a buy signal, read the story</div>'
+                : '<div class="guard"><b>Safeguard — reasons not to</b><ul>'+(g.guard||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>')+
+      '<div class="why">why: <span>'+esc((g.why||[]).join(' · '))+'</span></div>')+
+    '</div>';
+  }
+
+  function paint(){
+    if(!data) return;
+    var gems=(data.gems||[]).filter(passes);
+    var quiet=(data.gems||[]).filter(function(g){return g.status==='quiet';}).length;
+    hero.innerHTML =
+      '<div class="stat"><div class="k">With a story</div><div class="v">'+esc(data.candidates||0)+'</div><div class="n">big + positive, last '+esc(data.lookback_hours)+'h</div></div>'+
+      '<div class="stat"><div class="k">Still quiet</div><div class="v">'+quiet+'</div><div class="n">under ±'+esc(data.quiet_band_pct)+'% since the story</div></div>'+
+      '<div class="stat"><div class="k">Stirring</div><div class="v">'+((data.gems||[]).length-quiet)+'</div><div class="n">moving, not gone</div></div>'+
+      '<div class="stat"><div class="k">Already ran</div><div class="v">'+esc((data.ran||[]).length)+'</div><div class="n">past '+esc(data.ran_pct)+'% — not gems</div></div>'+
+      (data.baseline && data.baseline.n ? '<div class="stat"><div class="k">Baseline</div><div class="v">'+esc(data.baseline.spike_rate)+'%</div><div class="n">of '+esc(data.baseline.n)+' big positive stories spiked '+esc(data.spike_pct)+'%+ ('+esc(data.history_days)+'d)</div></div>' : '')+
+      '<div class="stat"><div class="k">Market</div><div class="v text">'+(data.in_session?'Open':'Closed')+'</div><div class="n">'+(data.in_session?'quiet means quiet':'quiet names react at the open')+'</div></div>';
+    if(!data.enabled){
+      cards.innerHTML='<div class="empty"><b>Hidden gems is off.</b> It needs the FMP_API_KEY environment variable on the server — the same key the research panel and float lookups use.</div>';
+      return;
+    }
+    if(!data.checked_at){
+      cards.innerHTML='<div class="empty">First pass runs about a minute after the server starts. Check back shortly.</div>';
+      return;
+    }
+    if(!gems.length){
+      cards.innerHTML='<div class="empty">'+((data.gems||[]).length
+        ? 'Nothing matches that filter.'
+        : '<b>No quiet stories right now.</b> Either the last '+esc(data.lookback_hours)+' hours had no positive Big News on a listed stock, or everything that did print has already moved — see the list below.')+'</div>';
+    } else {
+      cards.innerHTML=gems.map(function(g,i){return card(g,i,false);}).join('');
+    }
+    var ran=data.ran||[];
+    ranwrap.innerHTML = ran.length
+      ? '<h2 class="sec">Already ran — the crowd got there ('+ran.length+')</h2><div class="cards">'+
+        ran.map(function(g,i){return card(g,i,true);}).join('')+'</div>'
+      : '';
+    stamp.textContent = data.checked_at ? 'checked '+when(data.checked_at)+(data.last_error?' · last pass failed':'') : '';
+  }
+
+  function load(){
+    fetch('/api/gems').then(function(r){return r.json();}).then(function(j){
+      if(j.error){ cards.innerHTML='<div class="empty">'+esc(j.error)+'</div>'; return; }
+      data=j;
+      document.getElementById('minimp').textContent=j.min_importance;
+      document.getElementById('lookback').textContent=j.lookback_hours;
+      document.getElementById('quiet').textContent=j.quiet_band_pct;
+      document.getElementById('ran').textContent=j.ran_pct;
+      document.getElementById('refresh').textContent=j.refresh_seconds;
+      document.getElementById('hdays').textContent=j.history_days;
+      document.getElementById('spike').textContent=j.spike_pct;
+      document.getElementById('likely').textContent=j.likely_pct;
+      document.getElementById('unlikely').textContent=j.unlikely_pct;
+      document.getElementById('stale').textContent=Math.round((j.stale_minutes||240)/60);
+      paint();
+    }).catch(function(){ cards.innerHTML='<div class="empty">Could not reach the server.</div>'; });
+  }
+
+  document.getElementById('filters').addEventListener('click', function(e){
+    var c=e.target.closest('.chip'); if(!c) return;
+    filter=c.getAttribute('data-f');
+    [].forEach.call(document.querySelectorAll('#filters .chip'), function(x){ x.classList.toggle('on', x===c); });
+    paint();
+  });
+
+  load();
+  setInterval(load, 60000);
+})();
+</script>
+</body>
+</html>

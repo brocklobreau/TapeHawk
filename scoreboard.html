@@ -6,9 +6,9 @@
 <title>Tapehawk — scoreboard</title>
 <style>
   :root {
-    --bg:#0B0D10; --surface:#12161B; --surface-2:#181D24; --line:#232A33;
-    --ink:#E8EAED; --muted:#8B94A0; --faint:#5A626C;
-    --accent:#FFB020; --good:#3FBF5F; --bad:#F04A4A;
+    --bg:#060907; --surface:#0C110E; --surface-2:#121A15; --line:#1D2A22;
+    --ink:#E4EFE7; --muted:#8CA394; --faint:#587364;
+    --accent:#2EE86A; --good:#5DD98A; --bad:#F04A4A;
     --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   }
@@ -16,7 +16,7 @@
   body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
          font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
   a { color:inherit; }
-  header { position:sticky; top:0; z-index:20; background:rgba(11,13,16,.94);
+  header { position:sticky; top:0; z-index:20; background:rgba(6,9,7,.94);
            backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
            padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
   .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
@@ -65,15 +65,15 @@
      so without a fade on the right edge a reader simply never learns that
      "Median signed" -- the column that shows bad news falling -- exists. */
   .scroll { position:relative; overflow-x:auto; overscroll-behavior-x:contain;
-            scrollbar-width:thin; scrollbar-color:rgba(255,176,32,.45) transparent; }
+            scrollbar-width:thin; scrollbar-color:rgba(46,232,106,.45) transparent; }
   .scroll::-webkit-scrollbar { height:9px; }
   .scroll::-webkit-scrollbar-track { background:transparent; }
-  .scroll::-webkit-scrollbar-thumb { background:rgba(255,176,32,.38);
+  .scroll::-webkit-scrollbar-thumb { background:rgba(46,232,106,.38);
     border-radius:99px; border:2px solid var(--surface); }
   .hwrap { position:relative; }
   .hwrap::after { content:''; position:absolute; top:0; bottom:0; right:0;
     width:34px; pointer-events:none; opacity:0; transition:opacity .18s;
-    background:linear-gradient(to right, rgba(18,22,27,0), var(--surface));
+    background:linear-gradient(to right, rgba(12,17,14,0), var(--surface));
     border-radius:0 11px 11px 0; }
   .hwrap.more::after { opacity:1; }
   @media (prefers-reduced-motion:reduce){ .hwrap::after { transition:none; } }
@@ -84,12 +84,12 @@
   .vwrap { position:relative; }
   .vscroll { max-height:clamp(280px, 55vh, 620px); overflow:auto;
              overscroll-behavior:contain;
-             scrollbar-width:thin; scrollbar-color:rgba(255,176,32,.45) transparent; }
+             scrollbar-width:thin; scrollbar-color:rgba(46,232,106,.45) transparent; }
   .vscroll::-webkit-scrollbar { width:9px; height:9px; }
   .vscroll::-webkit-scrollbar-track { background:transparent; }
-  .vscroll::-webkit-scrollbar-thumb { background:rgba(255,176,32,.38);
+  .vscroll::-webkit-scrollbar-thumb { background:rgba(46,232,106,.38);
     border-radius:99px; border:2px solid var(--surface); }
-  .vscroll::-webkit-scrollbar-thumb:hover { background:rgba(255,176,32,.62); }
+  .vscroll::-webkit-scrollbar-thumb:hover { background:rgba(46,232,106,.62); }
   .vscroll thead th { position:sticky; top:0; z-index:1; background:var(--surface); }
   /* Chrome uses OVERLAY scrollbars: zero layout width, visible only while you
      are actively scrolling. So the styled bar above cannot be the only signal
@@ -98,7 +98,7 @@
      of the list. */
   .vwrap::after { content:''; position:absolute; left:0; right:0; bottom:0;
     height:42px; pointer-events:none; opacity:0; transition:opacity .18s;
-    background:linear-gradient(to bottom, rgba(18,22,27,0), var(--surface));
+    background:linear-gradient(to bottom, rgba(12,17,14,0), var(--surface));
     border-radius:0 0 11px 11px; }
   .vwrap.more::after { opacity:1; }
   @media (prefers-reduced-motion:reduce){ .vwrap::after { transition:none; } }
@@ -109,7 +109,7 @@
         display:block; }
   .badge { font-size:10.5px; font-weight:700; padding:2px 6px; border-radius:4px;
            text-transform:uppercase; }
-  .badge.positive { background:rgba(63,191,95,.16); color:var(--good); }
+  .badge.positive { background:rgba(93,217,138,.16); color:var(--good); }
   .badge.negative { background:rgba(240,74,74,.16); color:var(--bad); }
   .badge.unclear { background:var(--surface-2); color:var(--muted); }
   .tick { font-family:var(--mono); font-size:12px; font-weight:700; padding:2px 6px;
@@ -124,6 +124,7 @@
     <a class="tab" href="/">Live</a>
     <a class="tab" href="/halts">Halts</a>
     <a class="tab" href="/filings">SEC Filings</a>
+    <a class="tab" href="/gems">Hidden Gems</a>
     <a class="tab on" href="/scoreboard">Scoreboard</a>
   </nav>
   <div class="spacer"></div>

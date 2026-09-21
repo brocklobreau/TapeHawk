@@ -267,7 +267,7 @@ def recent(limit=100, since_id=None, symbol=None, category=None,
     sql = ("SELECT id, alpaca_id, created_at, received_at, latency_ms, headline, "
            "summary, author, source, url, symbols, categories, is_noise, "
            "importance, reasons, tone, tone_reasons, impact_level, impact_note, "
-           "graded_at, grade_symbol, move_15m, move_60m, grade_note "
+           "graded_at, grade_symbol, grade_entry, move_15m, move_60m, grade_note "
            "FROM headlines WHERE 1=1")
     args = []
     if not include_noise:
@@ -804,6 +804,55 @@ def recent_halts(limit=120, symbol=None, code=None, open_only=False,
     sql += " ORDER BY COALESCE(halted_at, seen_at) DESC, id DESC LIMIT ?"
     args.append(min(int(limit), 400))
     return [dict(r) for r in _conn().execute(sql, args)]
+
+
+# A "spike" for the gems page: the stock moved at least this much, up, within
+# the hour after the headline. Five percent is the line between a reaction and
+# a wobble on a small cap; it is stated in the payload so the page shows it.
+SPIKE_PCT = 5.0
+SPIKE_MIN_SAMPLE = 8
+
+
+def spike_history(category=None, days=90, tone="positive"):
+    """What stories like this one actually did, from this site's own graded
+    archive. Same category, same tone, Big News grade, last `days` days.
+
+    Returns n, how many spiked (best of +15m/+60m at or above SPIKE_PCT),
+    the rate, the median 60-minute move, and the share that ran 10%+. When the
+    category has fewer than SPIKE_MIN_SAMPLE graded rows the answer falls back
+    to every big positive story and says so, because an odds figure on four
+    samples is a coin toss wearing a percentage sign."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    c = _conn()
+
+    def rows(cat):
+        sql = ("SELECT move_15m, move_60m FROM headlines WHERE graded_at IS NOT NULL "
+               "AND move_60m IS NOT NULL AND created_at > ? AND importance >= ? AND tone = ?")
+        args = [since, BIG_NEWS_MIN, tone]
+        if cat:
+            sql += " AND categories LIKE ?"
+            args.append(f'%"{cat}"%')
+        return c.execute(sql, args).fetchall()
+
+    def summarise(rs, scope):
+        peaks = [max(r["move_15m"] if r["move_15m"] is not None else r["move_60m"],
+                     r["move_60m"]) for r in rs]
+        n = len(peaks)
+        spiked = sum(1 for p in peaks if p >= SPIKE_PCT)
+        ran = sum(1 for p in peaks if p >= 10.0)
+        return {"scope": scope, "n": n, "spiked": spiked,
+                "spike_rate": round(spiked / n * 100) if n else None,
+                "big_rate": round(ran / n * 100) if n else None,
+                "median_60m": _median([r["move_60m"] for r in rs]) if n else None,
+                "days": days, "spike_pct": SPIKE_PCT, "enough": n >= SPIKE_MIN_SAMPLE}
+
+    if category:
+        rs = rows(category)
+        if len(rs) >= SPIKE_MIN_SAMPLE:
+            return summarise(rs, category)
+    out = summarise(rows(None), "all")
+    out["wanted"] = category
+    return out
 
 
 def halt_count_today(symbol):
