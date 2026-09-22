@@ -334,7 +334,7 @@ def healthz():
     return {"ok": True}
 
 
-_started = False
+_started_pid = None
 _start_lock = threading.Lock()
 
 # How often to look for headlines old enough to grade. Each pass costs at
@@ -373,15 +373,25 @@ def _start_grader():
 
 
 def start_once():
-    """Guarded because gunicorn imports this module per worker. With more than
-    one worker each would open its own Alpaca socket and write the same rows —
-    so this service runs ONE worker, exactly like Bellwether, and for the same
-    reason."""
-    global _started
+    """Start the background threads IN THIS PROCESS, once.
+
+    Keyed on the process id. Render's gunicorn imports this module in its
+    master process before forking the worker that serves requests, so the
+    threads used to start in the master: the socket, the halt watcher and
+    the graders all ran and wrote the database, but the worker answering
+    /api/status and /api/stream held fork-copied objects whose threads never
+    ran. That is why the Live page said "reconnecting" all day while the
+    feed was fine, why server-sent events never delivered a headline to any
+    browser or to Halthawk, and why the status page showed zero polls.
+    Nothing starts at import now: gunicorn.conf.py starts the threads in the
+    worker after the fork, and the before_request hook is the fallback.
+    ONE worker, still, for the same reason as always -- two workers would be
+    two sockets writing the same rows."""
+    global _started_pid
     with _start_lock:
-        if _started:
+        if _started_pid == os.getpid():
             return
-        _started = True
+        _started_pid = os.getpid()
         store.init()
         # Score anything that arrived before the Big News feature shipped, so
         # the rail reflects the whole archive rather than only what happens to
@@ -422,10 +432,15 @@ def start_once():
             gems.start(log=log)
         except Exception as e:
             log(f"gems watcher failed to start (non-fatal): {e}")
-        log("tapehawk: started")
+        log(f"tapehawk: started (pid {os.getpid()})")
 
 
-start_once()
+@app.before_request
+def _ensure_started():
+    if _started_pid != os.getpid():
+        start_once()
+
 
 if __name__ == "__main__":
+    start_once()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
