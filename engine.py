@@ -58,7 +58,7 @@ DEFAULTS = {
     "min_headline_pct": 10.0,         # "Stock Now Up 8%" is not a halt worth chasing
     "trail_pct": 4.0,                 # out when price gives back this much from its high
     "trail_arm_pct": 3.0,             # the trail only switches on once the stock is this far above the entry
-    "stop_pct": 5.0,                  # out when price is this far under the entry
+    "stop_pct": 10.0,                 # out when price is this far under the entry -- room for the dip before the move
     "stall_seconds": 45,              # out when no new high for this long and price is off the high
     "stall_min_off_high_pct": 1.0,
     "max_hold_seconds": 900,          # a fuse, not a strategy: 15 minutes and it is not a quick trade
