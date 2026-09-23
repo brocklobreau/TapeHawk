@@ -1257,7 +1257,8 @@ def activist_13d(symbol, days=180):
     since = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
     rows = _conn().execute(
         """SELECT reporting_person, percent, filed_at, form FROM filings
-           WHERE ticker = ? AND kind = '13d' AND form LIKE 'SC 13D%' AND COALESCE(filed_at, seen_at) >= ?
+           WHERE ticker = ? AND kind = '13d' AND (form LIKE 'SC 13D%' OR form LIKE 'SCHEDULE 13D%')
+             AND COALESCE(filed_at, seen_at) >= ?
            ORDER BY COALESCE(filed_at, seen_at) DESC""", (symbol.upper(), since)).fetchall()
     if not rows:
         return {"activist_13d": 0}

@@ -349,11 +349,29 @@ def parse_atom(xml_text, want="SC 13D", subject_only=True):
     return rows
 
 
+# EDGAR renamed the beneficial-ownership forms when it moved them to
+# structured data: since 18 December 2024 a Schedule 13D is filed under the
+# form type "SCHEDULE 13D" (and "SCHEDULE 13D/A"), not "SC 13D". The old
+# spelling is still what this module calls the form internally, so every
+# match runs over both spellings. This was the whole 13D outage: the Atom
+# feed, full-text search and the daily index were each asked for a form type
+# nobody has filed in nearly two years, and each truthfully returned none.
+FORM_ALIASES = {
+    "SC 13D": ("SCHEDULE 13D", "SC 13D"),
+    "SC 13G": ("SCHEDULE 13G", "SC 13G"),
+}
+
+
+def _aliases(want):
+    return FORM_ALIASES.get(want.upper(), (want.upper(),))
+
+
 def _is_form(form, want):
     """8-K must not swallow 8-K/A's sibling forms like 8-K12B, and 'SC 13D'
-    must still match 'SC 13D/A'. Exact match or an amendment suffix only."""
-    f, w = (form or "").upper().strip(), want.upper()
-    return f == w or f.startswith(w + "/")
+    must still match 'SC 13D/A' -- and, since the rename, 'SCHEDULE 13D/A'.
+    Exact match or an amendment suffix only, over every spelling."""
+    f = (form or "").upper().strip()
+    return any(f == w or f.startswith(w + "/") for w in _aliases(want))
 
 
 _ITEM_RE = re.compile(r"\b(\d{1,2}\.\d{2})\b")
@@ -816,6 +834,9 @@ def _shape(text):
 
 
 _index_diag = {}
+# CIK, date and path at the end of an index row. Read from the right so a
+# form type or company name that overflows its column cannot shift them.
+_INDEX_TAIL = re.compile(r"(\d+)\s+(\d{8})\s+(\S+)\s*$")
 
 
 def _index_columns(header):
@@ -827,10 +848,14 @@ def _index_columns(header):
     shifts, and a company name long enough to fill its column leaves a single
     space before the CIK, which defeats any whitespace-based split.
     """
-    names = ["Form Type", "Company Name", "CIK", "Date Filed", "File Name"]
-    pos = []
-    for n in names:
-        i = header.find(n)
+    names = [("form type",), ("company name",), ("cik",), ("date filed",), ("file name", "filename")]
+    pos, h = [], header.lower()
+    for options in names:
+        i = -1
+        for n in options:
+            i = h.find(n)
+            if i >= 0:
+                break
         if i < 0:
             return None
         pos.append(i)
@@ -853,16 +878,37 @@ def parse_daily_index(text, want="SC 13D"):
     cols = None
     seen_forms = {}
     unparsed = 0
+    header_line = None
     for line in (text or "").splitlines():
-        if cols is None and "Form Type" in line and "File Name" in line:
+        low = line.lower()
+        if cols is None and header_line is None and "form type" in low and "company name" in low:
+            header_line = line.strip()
             cols = _index_columns(line)
             continue
         if not line.strip() or line.startswith("-") or "edgar/data/" not in line:
             continue
-        if cols:
-            a, b, c, d, e = cols
-            parts = [line[a:b].strip(), line[b:c].strip(), line[c:d].strip(),
-                     line[d:e].strip(), line[e:].strip()]
+        tail = _INDEX_TAIL.search(line)
+        if cols and tail:
+            # The form column is 12 wide and "SCHEDULE 13D/A" is 14: since the
+            # rename the form type overflows its column and pushes the company
+            # name along by a couple of characters. Slicing on the header
+            # offsets alone read that as form "SCHEDULE 13D" and company
+            # "/A ACME CORP" -- every amendment misfiled as an initial stake.
+            # So the form runs to the end of its last token, and the CIK, date
+            # and path are read from the right, where they cannot shift.
+            a, b = cols[0], cols[1]
+            end = b
+            while end < len(line) and not line[end].isspace():
+                end += 1
+            parts = [line[a:end].strip(), line[end:tail.start()].strip(),
+                     tail.group(1), tail.group(2), tail.group(3)]
+        elif tail:
+            # No usable header: the form is whatever precedes the first run of
+            # spaces, except that the renamed forms carry one internal space.
+            m = re.match(r"^(SCHEDULE \S+|SC \S+|\S+)", line.strip())
+            form = m.group(1) if m else ""
+            parts = [form, line.strip()[len(form):tail.start() - (len(line) - len(line.lstrip()))].strip(),
+                     tail.group(1), tail.group(2), tail.group(3)]
         else:
             parts = [p.strip() for p in re.split(r"\s{2,}", line.strip()) if p.strip()]
         if len(parts) < 5 or not parts[0]:
@@ -890,7 +936,8 @@ def parse_daily_index(text, want="SC 13D"):
             "issuer_confirmed": True,
         })
     top = sorted(seen_forms.items(), key=lambda kv: -kv[1])[:6]
-    _index_diag.update(header_found=cols is not None, rows=sum(seen_forms.values()),
+    _index_diag.update(header_found=cols is not None, header_line=header_line,
+                       rows=sum(seen_forms.values()),
                        unparsed=unparsed, top=top,
                        has_want=any(_is_form(k, want) for k in seen_forms))
     return [f for f in out if f["accession"]]
@@ -1012,21 +1059,25 @@ def collect(want="SC 13D", subject_only=True, log=print):
     the live logs are what tell us which path actually works.
     """
     errors = []
-    try:
-        rows = parse_atom(_get(ATOM_URL.format(form=want.replace(" ", "+"))),
-                          want=want, subject_only=subject_only)
-        rows, stale = drop_stale(rows)
-        if rows:
-            return rows, "atom"
-        errors.append(
-            f"atom: {_status.get('last_atom_entries', 0)} entries in the feed, "
-            f"0 matched {want}" + (f", {stale} too old" if stale else ""))
-    except Exception as e:
-        errors.append(f"atom: {e}")
+    # The current-filings feed filters by form-type PREFIX, so each spelling
+    # is its own request. The current spelling goes first and a hit ends it;
+    # the old one is only asked for when the new one came back empty.
+    for alias in _aliases(want):
+        try:
+            rows = parse_atom(_get(ATOM_URL.format(form=alias.replace(" ", "+"))),
+                              want=want, subject_only=subject_only)
+            rows, stale = drop_stale(rows)
+            if rows:
+                return rows, f"atom ({alias})"
+            errors.append(
+                f"atom {alias}: {_status.get('last_atom_entries', 0)} entries in the feed, "
+                f"0 matched" + (f", {stale} too old" if stale else ""))
+        except Exception as e:
+            errors.append(f"atom {alias}: {e}")
 
     try:
-        rows = parse_efts(_get(EFTS_URL.format(form=want.replace(" ", "+")),
-                               as_json=True), want=want)
+        forms = ",".join(a.replace(" ", "+") for a in _aliases(want))
+        rows = parse_efts(_get(EFTS_URL.format(form=forms), as_json=True), want=want)
         rows, stale = drop_stale(rows)
         if rows:
             return rows, "full-text-search"
@@ -1051,10 +1102,20 @@ def collect(want="SC 13D", subject_only=True, log=print):
     for day in days:
         stale = 0
         try:
-            rows = parse_daily_index(_get(_index_url_for(day)), want=want)
+            # Today's index does not exist until EDGAR builds it, and the
+            # Archives host answers a missing file with a 403 -- so for today
+            # a 403 is "not published yet", not a refusal, and not worth the
+            # backed-off retry either.
+            rows = parse_daily_index(_get(_index_url_for(day), _retry=(day != today)), want=want)
             rows, stale = drop_stale(rows)
             if rows:
                 return rows, f"daily-index {day.isoformat()}"
+        except SecError as e:
+            code = str(e)[:3]
+            if day == today and code in ("403", "404"):
+                errors.append(f"index {day}: not published yet ({code})")
+            else:
+                errors.append(f"index {day}: SecError {str(e)[:160]}")
         except Exception as e:
             errors.append(f"index {day}: {type(e).__name__} {e}")
         else:
@@ -1066,7 +1127,9 @@ def collect(want="SC 13D", subject_only=True, log=print):
             errors.append(
                 f"index {day}: fetched {_shape(_last_body[0])}, "
                 f"{d.get('rows', 0)} rows parsed"
-                + ("" if d.get("header_found") else " (NO header row found)")
+                + ("" if d.get("header_found") else
+                   (f" (header row not understood: {d['header_line'][:90]!r})" if d.get("header_line")
+                    else " (NO header row found)"))
                 + (f", {d['unparsed']} unparseable" if d.get("unparsed") else "")
                 + (f", top forms: {top}" if top else "")
                 + (f", {stale} {want} too old" if stale else f", 0 {want} rows"))
