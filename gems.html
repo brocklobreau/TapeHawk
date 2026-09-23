@@ -71,7 +71,22 @@
   .bars { display:flex; gap:3px; margin-top:4px; }
   .bars i { display:block; height:5px; border-radius:2px; background:var(--surface-2); position:relative; overflow:hidden; }
   .bars i b { position:absolute; left:0; top:0; bottom:0; background:var(--accent); }
-  .bars i.g b { background:#8FD3FF; } .bars i.q b { background:#C79BFF; } .bars i.s b { background:var(--warn); }
+  .bars i.g b { background:#8FD3FF; } .bars i.q b { background:#C79BFF; } .bars i.t b { background:#FF9BC8; } .bars i.s b { background:var(--warn); }
+  .bars i.none { opacity:.35; }
+  .fv { display:block; font-size:11px; }
+  .cat { font-family:var(--mono); font-weight:800; }
+  .tags { color:var(--faint); }
+  .cat.hi { color:var(--accent); } .cat.mid { color:var(--ink); } .cat.lo { color:var(--muted); }
+  .track { margin-top:22px; }
+  .track h2 { font-size:15px; margin:0 0 4px; }
+  .track .sub { color:var(--muted); font-size:12.5px; max-width:80ch; margin:0 0 12px; }
+  .tgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; margin-bottom:12px; }
+  .tcard { background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:12px 13px; }
+  .tcard .k { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); }
+  .tcard table { font-size:12.5px; margin-top:6px; }
+  .tcard td, .tcard th { padding:3px 6px; border:0; }
+  .tcard th { position:static; background:transparent; }
+  .tcard td.num { font-family:var(--mono); }
   .verdict { font-size:12px; color:var(--muted); }
   .facts { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 14px; font-size:12.5px; margin:0 0 10px; }
   .facts .k { color:var(--faint); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; display:block; }
@@ -81,7 +96,7 @@
   .why li { margin:2px 0; }
   .legend { font-size:11px; color:var(--faint); font-family:var(--mono); display:flex; gap:12px; flex-wrap:wrap; margin-top:8px; }
   .legend i { display:inline-block; width:10px; height:5px; border-radius:2px; vertical-align:middle; margin-right:4px; background:var(--accent); }
-  .legend i.g { background:#8FD3FF; } .legend i.q { background:#C79BFF; } .legend i.s { background:var(--warn); }
+  .legend i.g { background:#8FD3FF; } .legend i.q { background:#C79BFF; } .legend i.t { background:#FF9BC8; } .legend i.s { background:var(--warn); }
   .empty { padding:28px 16px; color:var(--muted); line-height:1.65; }
   .empty b { color:var(--ink); }
   .scroll { overflow:auto; }
@@ -107,14 +122,18 @@
 </header>
 
 <div class="wrap">
-  <p class="lede"><b>Good businesses the market isn't paying up for.</b> Every US-listed company over $300M,
-    scored on three plain tests — <b>cheap</b> for what it earns, <b>growing</b> at double digits, and
-    <b>really profitable</b> with a clean balance sheet — after hard gates that throw out anything losing money,
-    burning cash, shrinking, or drowning in debt. Small and mid caps get a few extra points for being hidden;
-    a big name that clears the bar is listed too.</p>
-  <p class="caveat">This is arithmetic on reported numbers, refreshed daily after the close. It is a place to
-    start reading, not a recommendation: it can't see a lawsuit, a customer leaving, or a CFO resigning next week.
-    Click a row for the full reasoning and the exact figures behind it.</p>
+  <p class="lede"><b>The 20 best-scoring businesses the market isn't paying up for — and hasn't noticed yet.</b> Every US-listed
+    company over $300M, run through the same rules Bellwether's undervalued screen used: it has to be <b>cheap</b> on
+    its own numbers, <b>really profitable</b> with a clean balance sheet, <b>growing</b>, and it must <b>not have moved
+    yet</b> — anything in the top third of its 52-week range or up 35% in ten sessions is thrown out, not scored down.
+    Its own arithmetic has to say there's a <b>discount</b> to collect, and quality throttles cheapness, because a
+    stock is usually that cheap for a reason. Then the part Bellwether never had: a <b>catalyst</b> score — earnings beats,
+    analyst upgrades, a trend that has started to turn, insiders buying, an activist 13D, buybacks — because cheap is the
+    setup and a catalyst is what makes the market look. A cheap stock with nothing happening can sit cheap for years.</p>
+  <p class="caveat">This is arithmetic on reported numbers, refreshed daily after the close. It narrows thousands of
+    stocks to a handful that are cheap, sound and still early; some will re-rate, some will stay cheap for years.
+    It can't see a lawsuit, a customer leaving, or a CFO resigning next week. Click a row for the reasoning, the
+    fair-value math and the exact figures behind it.</p>
 
   <div class="hero" id="hero"></div>
 
@@ -124,28 +143,54 @@
     <span class="chip" data-size="mid">Mid $2–10B</span>
     <span class="chip" data-size="large">Large &gt;$10B</span>
     <select id="sector"><option value="">All sectors</option></select>
-    <span class="chip" data-min="70">Strong only</span>
+    <span class="chip" data-min="75">Deep value only</span>
   </div>
 
   <div class="panel"><div class="scroll" id="list"></div></div>
-  <div class="legend"><span><i></i>value /30</span><span><i class="g"></i>growth /30</span><span><i class="q"></i>quality /30</span><span><i class="s"></i>hidden /10</span></div>
+  <div class="legend"><span><i></i>cheap ×30%</span><span><i class="q"></i>quality ×20%</span><span><i class="g"></i>growth ×10%</span><span><i class="t"></i>not moved yet ×15%</span><span><i class="s"></i>catalyst ×25%</span></div>
+
+  <section class="track" id="track"></section>
 
   <details class="how">
     <summary>How the score works</summary>
-    <p><b>Gates first.</b> Out if trailing net margin is zero or negative, free cash flow is negative, revenue is
-      shrinking, debt is over twice equity, or there are no earnings to price. A story stock can't score its way in.</p>
-    <p><b>Value, up to 30.</b> P/E under 12 earns 12 points, under 18 earns 8, under 25 earns 5 only if growth is over 15%.
-      EV/EBITDA under 10 earns 8, under 15 earns 4. Free-cash-flow yield (cash generated per share over the price) of 6%+
-      earns 10, 3%+ earns 5.</p>
-    <p><b>Growth, up to 30.</b> Revenue growth of 20%+ earns 15, 10%+ earns 10, 5%+ earns 5. Earnings-per-share growth
-      of 20%+ earns 15, 10%+ earns 8.</p>
-    <p><b>Quality, up to 30.</b> Net margin 15%+ earns 10, 8%+ earns 6, positive earns 3. Return on equity 15%+ earns 8,
-      10%+ earns 4. Debt under half of equity earns 7, under equity earns 4. Current ratio of 1.5+ earns 5.</p>
-    <p><b>Hidden, up to 10.</b> Under $2B earns 4, under $10B earns 2. Trading in the bottom 30% of its 52-week range earns 3.
-      Analyst consensus target 20%+ above the price earns 3.</p>
-    <p><b>Reading it.</b> 70+ means all three tests passed at once — rare. 55+ means two clearly did. 40+ is one clear
-      strength. Everything else passed the gates and not much more. Numbers come from the latest reported annual figures
-      and the current price, so a company that just reported will move the next day.</p>
+    <p><b>Vetoes first, not penalties.</b> A name is out — at any score — if it has no usable P/E or is unprofitable;
+      P/E is over 45; net margin is under 2%; free cash flow is negative; revenue is shrinking; debt is over twice equity;
+      it sits above 65% of its 52-week range (the re-rating already happened); it is up more than 35% in the last ten
+      sessions (the catalyst already fired); or its own fair-value math implies less than 15% upside (priced about right —
+      a fine company, not an undervalued one). The reason is kept, not swallowed.</p>
+    <p><b>Cheap, 30%.</b> P/E, EV/EBITDA, free-cash-flow yield and price-to-book, each banded 0–100 (P/E under 8 is 100,
+      under 12 is 92, under 16 is 80, under 20 is 66, under 25 is 50, under 30 is 36). Then <b>quality throttles it</b>:
+      the cheap score is multiplied by 0.35 + 0.65 × quality, so a P/E-of-6 name with poor quality keeps only about a
+      third of its discount. A weighted sum would let an extreme discount drag a bad business up the list, which is
+      precisely backwards.</p>
+    <p><b>Quality, 20%.</b> Net margin (20%+ is 100), return on equity (20%+ is 100), free-cash-flow margin (15%+ is 100)
+      and debt to equity (under 0.3 is 100).</p>
+    <p><b>Growth, 10%.</b> Revenue growth (25%+ is 100, 12%+ is 86, 5%+ is 70, flat is 52) and earnings-per-share growth
+      on the same shape.</p>
+    <p><b>Not moved yet, 15%.</b> Lower in the 52-week range scores higher — the opposite of a momentum screen, on
+      purpose — and a quiet last ten sessions (under 5% either way is 100) scores higher than a name that is starting to
+      run.</p>
+    <p><b>Catalyst, 25%.</b> Cheap is the setup; this asks whether anything is happening to make the market look. Six
+      signals, each with evidence behind it, weighted 25 / 20 / 20 / 15 / 10 / 10: <b>earnings beats</b> in the last four
+      quarters (4 of 4 is 95, 3 is 80, 2 is 55; a miss last quarter costs 15 — stocks drift for weeks after a beat, the most
+      robust finding in the literature); net <b>analyst upgrades</b> in 90 days (+2 is 95, +1 is 78, 0 is 50, −2 is 12);
+      the <b>six-month trend</b> (up 5–40% and above the 50-day average is best — value that has started to work beats
+      value still falling, which scores 15–35); <b>insider open-market buying</b> in 180 days (two or more buyers is 95,
+      one is 78, only sales is 40); an activist <b>Schedule 13D</b> on file from this site's own SEC watcher (100, else 40);
+      and the <b>share count</b> year over year (down 3%+ is 95, any buyback 75, dilution over 2% is 20). Headline
+      word-counting is not used.</p>
+    <p><b>Fair value.</b> A fair P/E starts at 12× (a no-growth, average-margin business), adds 0.35× per point of
+      revenue growth and 0.2× per point of margin over 8%, and is capped between 9× and 26×. What that multiple implies is
+      blended 60/40 with the analyst consensus target and shown as a dollar figure. It is what the numbers imply today,
+      not a forecast of when the market will agree.</p>
+    <p><b>Track record.</b> Every symbol that enters the list is written down with that day's price and the S&P (SPY),
+      then graded at one, three and six months against the S&P over the same window. A symbol is not re-recorded until
+      30 days after its last pick, so one stock can't fill the record with copies of itself. The split by catalyst score
+      is the question the record exists to answer: does cheap-plus-catalyst beat cheap-alone? Until there are dozens of
+      graded picks, treat the numbers as anecdotes.</p>
+    <p><b>Reading it.</b> 75+ is deep value with quality behind it — rare. 62+ is undervalued and worth the work. 58+ is
+      mildly cheap. Under 58 is not shown at all: a weak gem is not a gem. Figures come from the latest reported annual
+      numbers and the current price, so a company that just reported will move the next day.</p>
   </details>
 </div>
 
@@ -162,17 +207,37 @@
   function num(v,d,s){ return (v==null||isNaN(v))?'—':(+v).toFixed(d==null?1:d)+(s||''); }
   function pct(v){ if(v==null||isNaN(v))return '—'; var n=+v; return (n>0?'+':'')+n.toFixed(1)+'%'; }
   function when(iso){ var d=new Date(iso); if(isNaN(d))return ''; return d.toLocaleDateString([], {month:'short',day:'numeric'})+' '+d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}); }
-  function cls(s){ return s>=70?'s70':s>=55?'s55':s>=40?'s40':'s0'; }
-  function bar(v,max,c){ return '<i class="'+c+'" style="width:'+Math.round(80*max/30)+'px"><b style="width:'+Math.round(v/max*100)+'%"></b></i>'; }
+  function cls(s){ return s>=75?'s70':s>=62?'s55':s>=58?'s40':'s0'; }
+  var W={cheap:30,quality:20,growth:10,timing:15,catalyst:25}, C={cheap:'',quality:'q',growth:'g',timing:'t',catalyst:'s'};
+  function bar(v,k){ return '<i class="'+C[k]+(v==null?' none':'')+'" style="width:'+Math.round(W[k]*2.4)+'px" title="'+k+' '+(v==null?'no data':v)+'"><b style="width:'+(v==null?0:Math.round(v))+'%"></b></i>'; }
+  function bars(p){ return ['cheap','quality','growth','timing','catalyst'].map(function(k){return bar(p[k],k);}).join(''); }
 
+  function catTags(f){
+    var t=[];
+    if(f.beats_4q!=null) t.push(f.beats_4q+'/4 beats');
+    if((f.upgrades||0)-(f.downgrades||0)>0) t.push('upgrades');
+    if(f.insider_buys>0) t.push('insiders');
+    if(f.activist_13d>0) t.push('13D');
+    if(f.shares_growth!=null&&f.shares_growth<0) t.push('buyback');
+    if(f.ret_6m!=null&&f.ret_6m>5&&f.ret_6m<40) t.push('turning');
+    return t.join(' · ');
+  }
   function detail(g){
     var f=g.facts||{}, p=g.parts||{};
     var pos=(f.price!=null&&f.year_low!=null&&f.year_high>f.year_low)?Math.round((f.price-f.year_low)/(f.year_high-f.year_low)*100):null;
     function kv(k,v,c){ return '<div><span class="k">'+k+'</span><span class="v '+(c||'')+'">'+v+'</span></div>'; }
     return '<div class="facts">'+
-      kv('Score', p.value+' value · '+p.growth+' growth · '+p.quality+' quality · '+p.setup+' hidden')+
+      kv('Parts', ['cheap','quality','growth','timing','catalyst'].map(function(k){return (p[k]==null?'—':p[k])+' '+k;}).join(' · '))+
+      kv('Fair value', g.fair_price!=null?money(g.fair_price)+' <span class="'+(g.upside>0?'up':'down')+'">'+pct(g.upside)+'</span>':'—')+
+      kv('Last 10 sessions', pct(f.run_10d), f.run_10d>0?'up':'down')+kv('3 mo / 6 mo', pct(f.ret_3m)+' / '+pct(f.ret_6m), f.ret_6m>0?'up':'down')+
+      kv('vs 50-day avg', f.avg50!=null&&f.price!=null?(f.price>f.avg50?'above':'below')+' <span class="dim">('+money(f.avg50)+')</span>':'—', f.avg50!=null&&f.price>f.avg50?'up':'')+
+      kv('Earnings beats', f.beats_4q!=null?f.beats_4q+' of last '+(f.quarters_seen||4)+(f.last_surprise!=null?' <span class="dim">(last '+pct(f.last_surprise)+')</span>':''):'—', f.beats_4q>=3?'up':'')+
+      kv('Analyst grades 90d', f.upgrades!=null?f.upgrades+' up / '+f.downgrades+' down':'—', (f.upgrades||0)>(f.downgrades||0)?'up':'')+
+      kv('Activist 13D', f.activist_13d>0?esc(f.activist_who||'yes')+(f.activist_pct?' <span class="dim">'+num(f.activist_pct,1,'%')+'</span>':''):'none on file', f.activist_13d>0?'up':'')+
+      kv('Share count YoY', pct(f.shares_growth), f.shares_growth<0?'up':f.shares_growth>2?'down':'')+
+      kv('Insider buys / sells', f.insider_buys!=null?(f.insider_buys+' / '+(f.insider_sells||0)+(f.insider_buy_value?' <span class="dim">($'+Math.round(f.insider_buy_value).toLocaleString()+' bought)</span>':'')):'—', f.insider_buys>0?'up':'')+
       kv('P/E', num(f.pe))+kv('EV / EBITDA', num(f.ev_ebitda))+kv('Price / sales', num(f.ps,2))+kv('Price / book', num(f.pb,2))+
-      kv('FCF yield', num(f.fcf_yield,1,'%'), f.fcf_yield>=3?'up':'')+
+      kv('FCF yield', num(f.fcf_yield,1,'%'), f.fcf_yield>=3?'up':'')+kv('FCF margin', num(f.fcf_margin,1,'%'))+
       kv('Revenue growth', pct(f.rev_growth), f.rev_growth>0?'up':'down')+kv('EPS growth', pct(f.eps_growth), f.eps_growth>0?'up':'down')+
       kv('Net margin', num(f.net_margin,1,'%'))+kv('Operating margin', num(f.op_margin,1,'%'))+kv('Return on equity', num(f.roe,1,'%'))+
       kv('Debt / equity', num(f.debt_to_equity,2))+kv('Current ratio', num(f.current_ratio,2))+kv('Dividend yield', num(f.dividend_yield,2,'%'))+
@@ -189,9 +254,9 @@
     var c=data.counts||{};
     hero.innerHTML=
       '<div class="stat"><div class="k">Companies scored</div><div class="v">'+esc(c.scored||0)+'</div><div class="n">US-listed, over $300M</div></div>'+
-      '<div class="stat"><div class="k">Pass the gates</div><div class="v">'+esc(c.passed||0)+'</div><div class="n">profitable, cash-positive, growing, not over-levered</div></div>'+
-      '<div class="stat"><div class="k">Good (55+)</div><div class="v">'+esc(c.good||0)+'</div><div class="n">two of three tests clearly passed</div></div>'+
-      '<div class="stat"><div class="k">Strong (70+)</div><div class="v">'+esc(c.strong||0)+'</div><div class="n">cheap, growing and profitable at once</div></div>'+
+      '<div class="stat"><div class="k">Survive the vetoes</div><div class="v">'+esc(c.passed||0)+'</div><div class="n">cheap, profitable, not over-levered, hasn\'t moved, real discount</div></div>'+
+      '<div class="stat"><div class="k">Score 58+</div><div class="v">'+esc(c.shown||0)+'</div><div class="n">the top 20 are listed; a weak gem is not a gem</div></div>'+
+      '<div class="stat"><div class="k">Deep value (75+)</div><div class="v">'+esc(c.strong||0)+'</div><div class="n">cheap, sound and still early at once</div></div>'+
       '<div class="stat"><div class="k">Last pass</div><div class="v text">'+(data.last_scored_at?esc(when(data.last_scored_at)):'—')+'</div><div class="n">'+(data.running?('running: '+(data.scored||0)+' of '+(data.universe||0)+' scored'):'refreshes daily after the close')+'</div></div>';
     var sel=document.getElementById('sector');
     if(sel.options.length<=1&&(data.sectors||[]).length){
@@ -200,20 +265,43 @@
     var rows=(data.gems||[]).filter(function(g){ return g.score>=minScore; });
     if(!data.enabled){ list.innerHTML='<div class="empty"><b>Hidden Gems is off.</b> It needs the FMP_API_KEY environment variable on the server.</div>'; return; }
     if(!rows.length){
-      list.innerHTML='<div class="empty">'+(c.scored?'Nothing matches those filters.':(data.running?'<b>First pass is running</b> — '+(data.scored||0)+' of '+(data.universe||0)+' companies scored so far. Rows appear as they pass.':'<b>First pass starts about two minutes after the server comes up</b> and takes around an hour. Check back.'))+'</div>';
+      list.innerHTML='<div class="empty">'+(c.scored?'Nothing matches those filters.':(data.running?'<b>First pass is running</b> — '+(data.scored||0)+' of '+(data.universe||0)+' companies scored so far. Rows appear as they pass.':'<b>First pass starts about two minutes after the server comes up</b> and takes a couple of hours. Check back.'))+'</div>';
       return;
     }
-    list.innerHTML='<table><thead><tr><th>#</th><th>Company</th><th class="hide-sm">Sector</th><th class="num">Mkt cap</th><th class="num">Price</th><th class="num">P/E</th><th class="num hide-sm">Rev growth</th><th class="num hide-sm">Net margin</th><th class="num hide-sm">FCF yield</th><th>Score</th></tr></thead><tbody>'+
+    list.innerHTML='<table><thead><tr><th>#</th><th>Company</th><th class="hide-sm">Sector</th><th class="num">Mkt cap</th><th class="num">Price</th><th class="num">P/E</th><th class="num hide-sm">Rev growth</th><th class="num hide-sm">Net margin</th><th class="num hide-sm">FCF yield</th><th class="num">Fair value</th><th class="num">Catalyst</th><th>Score</th></tr></thead><tbody>'+
       rows.map(function(g,i){ var f=g.facts||{}, p=g.parts||{};
         return '<tr class="row" data-s="'+esc(g.symbol)+'"><td class="num dim">'+(i+1)+'</td>'+
           '<td><a class="tick" href="/?ticker='+encodeURIComponent(g.symbol)+'" onclick="event.stopPropagation()">'+esc(g.symbol)+'</a><span class="name">'+esc(g.name||'')+'</span></td>'+
           '<td class="hide-sm">'+esc(g.sector||'—')+'</td><td class="num">'+money(g.market_cap)+'</td><td class="num">'+money(g.price)+'</td>'+
           '<td class="num">'+num(f.pe)+'</td><td class="num hide-sm '+(f.rev_growth>0?'up':'down')+'">'+pct(f.rev_growth)+'</td>'+
           '<td class="num hide-sm">'+num(f.net_margin,1,'%')+'</td><td class="num hide-sm">'+num(f.fcf_yield,1,'%')+'</td>'+
-          '<td><span class="score '+cls(g.score)+'">'+g.score+'</span><div class="bars">'+bar(p.value,30,'')+bar(p.growth,30,'g')+bar(p.quality,30,'q')+bar(p.setup,10,'s')+'</div><div class="verdict">'+esc(g.verdict||'')+'</div></td></tr>'+
-          (open[g.symbol]?'<tr class="detail"><td colspan="10">'+detail(g)+'</td></tr>':'');
+          '<td class="num">'+(g.fair_price!=null?money(g.fair_price)+'<span class="fv '+(g.upside>0?'up':'down')+'">'+pct(g.upside)+'</span>':'—')+'</td>'+
+          '<td class="num"><span class="cat '+(p.catalyst>=70?'hi':p.catalyst>=45?'mid':'lo')+'">'+(p.catalyst==null?'—':p.catalyst)+'</span></td>'+
+          '<td><span class="score '+cls(g.score)+'">'+num(g.score,1)+'</span><div class="bars">'+bars(p)+'</div><div class="verdict">'+esc(g.verdict||'')+(catTags(f)?' <span class="tags">· '+esc(catTags(f))+'</span>':'')+'</div></td></tr>'+
+          (open[g.symbol]?'<tr class="detail"><td colspan="12">'+detail(g)+'</td></tr>':'');
       }).join('')+'</tbody></table>';
     stamp.textContent=data.last_scored_at?('scored '+when(data.last_scored_at)):'';
+    paintTrack();
+  }
+
+  function paintTrack(){
+    var el=document.getElementById('track'), t=data.track||{}, H=t.horizons||{}, picks=data.picks||[];
+    function cell(v,sign){ return v==null?'<td class="num dim">—</td>':'<td class="num '+(sign?(v>0?'up':v<0?'down':''):'')+'">'+(sign?pct(v):num(v,0,'%'))+'</td>'; }
+    function card(k,label){
+      var a=(H[k]||{}).all||{}, hi=(H[k]||{}).high_catalyst||{}, lo=(H[k]||{}).low_catalyst||{};
+      function row(name,r){ return '<tr><td>'+name+'</td><td class="num dim">'+(r.n||0)+'</td>'+cell(r.ret,1)+cell(r.spy,1)+cell(r.hit,0)+'</tr>'; }
+      return '<div class="tcard"><div class="k">'+label+'</div><table><thead><tr><th></th><th class="num">graded</th><th class="num">pick</th><th class="num">S&amp;P</th><th class="num">beat S&amp;P</th></tr></thead><tbody>'+
+        row('all picks',a)+row('catalyst 60+',hi)+row('catalyst under 60',lo)+'</tbody></table></div>';
+    }
+    var graded=Object.keys(H).some(function(k){return (H[k].all||{}).n>0;});
+    el.innerHTML='<h2>Track record</h2><p class="sub">'+(t.picks?(t.picks+' pick'+(t.picks==1?'':'s')+' recorded since '+esc(t.first_pick||'')+'. '):'No picks recorded yet — the first list after this deploy starts the clock. ')+
+      'Each pick is graded against the S&amp;P over the same window at one, three and six months; the split by catalyst score is the question this exists to answer.'+
+      (graded?'':' Nothing has reached a one-month window yet.')+'</p>'+
+      '<div class="tgrid">'+card('1m','One month')+card('3m','Three months')+card('6m','Six months')+'</div>'+
+      (picks.length?'<div class="panel"><div class="scroll"><table><thead><tr><th>Picked</th><th>Symbol</th><th class="num">Rank</th><th class="num">Score</th><th class="num">Catalyst</th><th class="num">Price then</th><th class="num">1 mo</th><th class="num">3 mo</th><th class="num">6 mo</th></tr></thead><tbody>'+
+        picks.map(function(p){ function r(h){ return p['ret_'+h]==null?'<td class="num dim">—</td>':'<td class="num '+(p['ret_'+h]>p['spy_'+h]?'up':'down')+'">'+pct(p['ret_'+h])+' <span class="dim">vs '+pct(p['spy_'+h])+'</span></td>'; }
+          return '<tr><td class="dim">'+esc(p.picked_on)+'</td><td><a class="tick" href="/?ticker='+encodeURIComponent(p.symbol)+'">'+esc(p.symbol)+'</a></td><td class="num">'+p.rank+'</td><td class="num">'+num(p.score,1)+'</td><td class="num">'+(p.catalyst_pts==null?'—':p.catalyst_pts)+'</td><td class="num">'+money(p.price)+'</td>'+r('1m')+r('3m')+r('6m')+'</tr>'; }).join('')+
+        '</tbody></table></div></div>':'');
   }
 
   list.addEventListener('click', function(e){
@@ -229,7 +317,7 @@
   document.getElementById('sector').addEventListener('change', function(e){ sector=e.target.value; load(); });
 
   function load(){
-    var u='/api/gems?limit=80'+(size?'&size='+size:'')+(sector?'&sector='+encodeURIComponent(sector):'');
+    var u='/api/gems?limit=20'+(size?'&size='+size:'')+(sector?'&sector='+encodeURIComponent(sector):'');
     fetch(u).then(function(r){return r.json();}).then(function(j){
       if(j.error){ list.innerHTML='<div class="empty">'+esc(j.error)+'</div>'; return; }
       data=j; paint();

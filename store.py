@@ -143,11 +143,23 @@ CREATE TABLE IF NOT EXISTS gems (
   symbol       TEXT PRIMARY KEY,
   name         TEXT, sector TEXT, industry TEXT, exchange TEXT,
   market_cap   REAL, price REAL,
-  score        INTEGER, value_pts INTEGER, growth_pts INTEGER, quality_pts INTEGER, setup_pts INTEGER,
+  score        REAL, value_pts INTEGER, growth_pts INTEGER, quality_pts INTEGER, setup_pts INTEGER,
+  timing_pts   INTEGER, catalyst_pts INTEGER, fair_price REAL, upside REAL, rule_version INTEGER,
   facts        TEXT, notes TEXT, disqualified TEXT, verdict TEXT,
   scored_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_gems_score ON gems(score DESC);
+CREATE TABLE IF NOT EXISTS gem_picks (
+  id           INTEGER PRIMARY KEY,
+  symbol       TEXT NOT NULL,
+  picked_on    TEXT NOT NULL,
+  rank         INTEGER, score REAL, catalyst_pts INTEGER,
+  price        REAL, spy REAL,
+  ret_1m REAL, spy_1m REAL, graded_1m TEXT,
+  ret_3m REAL, spy_3m REAL, graded_3m TEXT,
+  ret_6m REAL, spy_6m REAL, graded_6m TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ix_gem_picks ON gem_picks(symbol, picked_on);
 """
 
 INDEX_SQL = """
@@ -216,6 +228,11 @@ def _conn():
                 c.execute(f"ALTER TABLE halts ADD COLUMN {col} {ddl}")
         c.executescript(INDEX_SQL)          # only now are all columns present
         c.executescript(GEMS_SQL)
+        ghave = {r["name"] for r in c.execute("PRAGMA table_info(gems)")}
+        for col, ddl in (("timing_pts", "INTEGER"), ("catalyst_pts", "INTEGER"),
+                         ("fair_price", "REAL"), ("upside", "REAL"), ("rule_version", "INTEGER")):
+            if col not in ghave:
+                c.execute(f"ALTER TABLE gems ADD COLUMN {col} {ddl}")
         c.commit()
         _local.conn = c
     return c
@@ -1072,20 +1089,27 @@ def prune(keep_days=45):
 def upsert_gem(g):
     c = _conn()
     p = g.get("parts") or {}
+    def pts(k):
+        v = p.get(k)
+        return None if v is None else int(round(v))
     c.execute(
         """INSERT INTO gems (symbol, name, sector, industry, exchange, market_cap, price, score,
-                             value_pts, growth_pts, quality_pts, setup_pts, facts, notes,
+                             value_pts, growth_pts, quality_pts, setup_pts, timing_pts, catalyst_pts,
+                             fair_price, upside, rule_version, facts, notes,
                              disqualified, verdict, scored_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(symbol) DO UPDATE SET name=excluded.name, sector=excluded.sector,
              industry=excluded.industry, exchange=excluded.exchange, market_cap=excluded.market_cap,
              price=excluded.price, score=excluded.score, value_pts=excluded.value_pts,
              growth_pts=excluded.growth_pts, quality_pts=excluded.quality_pts,
-             setup_pts=excluded.setup_pts, facts=excluded.facts, notes=excluded.notes,
+             setup_pts=excluded.setup_pts, timing_pts=excluded.timing_pts, catalyst_pts=excluded.catalyst_pts,
+             fair_price=excluded.fair_price, upside=excluded.upside, rule_version=excluded.rule_version,
+             facts=excluded.facts, notes=excluded.notes,
              disqualified=excluded.disqualified, verdict=excluded.verdict, scored_at=excluded.scored_at""",
         (g["symbol"], g.get("name"), g.get("sector"), g.get("industry"), g.get("exchange"),
-         g.get("market_cap"), g.get("price"), int(g.get("score") or 0),
-         int(p.get("value") or 0), int(p.get("growth") or 0), int(p.get("quality") or 0), int(p.get("setup") or 0),
+         g.get("market_cap"), g.get("price"), float(g.get("score") or 0),
+         pts("cheap") if "cheap" in p else pts("value"), pts("growth"), pts("quality"), pts("setup"),
+         pts("timing"), pts("catalyst"), g.get("fair_price"), g.get("upside"), g.get("rule_version"),
          json.dumps(g.get("facts") or {}), json.dumps(g.get("notes") or []),
          g.get("disqualified"), g.get("verdict"), datetime.now(timezone.utc).isoformat()))
     c.commit()
@@ -1095,14 +1119,20 @@ def _gem_row(r):
     d = dict(r)
     d["facts"] = json.loads(d.get("facts") or "{}")
     d["notes"] = json.loads(d.get("notes") or "[]")
-    d["parts"] = {"value": d.pop("value_pts", 0), "growth": d.pop("growth_pts", 0),
-                  "quality": d.pop("quality_pts", 0), "setup": d.pop("setup_pts", 0)}
+    d["parts"] = {"cheap": d.pop("value_pts", None), "quality": d.pop("quality_pts", None),
+                  "growth": d.pop("growth_pts", None), "timing": d.pop("timing_pts", None),
+                  "catalyst": d.pop("catalyst_pts", None)}
+    d.pop("setup_pts", None)
     return d
 
 
-def top_gems(limit=60, sector=None, size=None, small_cap=2e9, mid_cap=10e9):
-    sql = "SELECT * FROM gems WHERE disqualified IS NULL"
-    args = []
+def top_gems(limit=60, sector=None, size=None, small_cap=2e9, mid_cap=10e9, min_score=0, rule_version=None):
+    """Survivors under the current rules only: after a rule change, rows scored
+    under the old rules stay hidden until the re-scoring pass reaches them."""
+    sql = "SELECT * FROM gems WHERE disqualified IS NULL AND score >= ?"
+    args = [min_score]
+    if rule_version is not None:
+        sql += " AND rule_version = ?"; args.append(rule_version)
     if sector:
         sql += " AND sector = ?"
         args.append(sector)
@@ -1122,19 +1152,118 @@ def gem(symbol):
     return _gem_row(r) if r else None
 
 
-def gem_counts():
+def gem_counts(min_score=0, rule_version=None):
     c = _conn()
-    total = c.execute("SELECT COUNT(*) n FROM gems").fetchone()["n"]
-    passed = c.execute("SELECT COUNT(*) n FROM gems WHERE disqualified IS NULL").fetchone()["n"]
-    strong = c.execute("SELECT COUNT(*) n FROM gems WHERE disqualified IS NULL AND score >= 70").fetchone()["n"]
-    good = c.execute("SELECT COUNT(*) n FROM gems WHERE disqualified IS NULL AND score >= 55").fetchone()["n"]
-    return {"scored": total, "passed": passed, "strong": strong, "good": good}
+    rv = " AND rule_version = ?" if rule_version is not None else ""
+    ra = (rule_version,) if rule_version is not None else ()
+    def n(where, *a):
+        return c.execute(f"SELECT COUNT(*) n FROM gems WHERE {where}{rv}", a + ra).fetchone()["n"]
+    return {"scored": n("1"), "passed": n("disqualified IS NULL"),
+            "shown": n("disqualified IS NULL AND score >= ?", min_score),
+            "good": n("disqualified IS NULL AND score >= 62"),
+            "strong": n("disqualified IS NULL AND score >= 75")}
 
 
-def gem_sectors():
+def gem_sectors(min_score=0, rule_version=None):
+    rv = " AND rule_version = ?" if rule_version is not None else ""
+    ra = (rule_version,) if rule_version is not None else ()
     return [r["sector"] for r in _conn().execute(
-        "SELECT sector, COUNT(*) n FROM gems WHERE disqualified IS NULL AND sector IS NOT NULL "
-        "GROUP BY sector ORDER BY n DESC")]
+        "SELECT sector, COUNT(*) n FROM gems WHERE disqualified IS NULL AND score >= ? AND sector IS NOT NULL"
+        + rv + " GROUP BY sector ORDER BY n DESC", (min_score,) + ra)]
+
+
+def gems_rule_version():
+    """The rule version the newest row was scored under, or None."""
+    r = _conn().execute("SELECT rule_version FROM gems ORDER BY scored_at DESC LIMIT 1").fetchone()
+    return r["rule_version"] if r else None
+
+
+# ---- the track record: what the list actually did afterwards --------------------
+# A pick is a symbol entering the shown list. It is recorded once with the price
+# that day and the S&P (SPY) that day, then graded at one, three and six months
+# against SPY over the same window. A symbol that stays on the list is not
+# re-recorded until 30 days after its last pick, so one stock cannot fill the
+# record with thirty copies of itself.
+
+PICK_COOLDOWN_DAYS = 30
+HORIZONS = {"1m": 30, "3m": 91, "6m": 182}
+
+
+def record_gem_picks(rows, spy_price, today=None):
+    """rows: the shown list in rank order (dicts with symbol/score/parts/price).
+    Returns the number of new picks written."""
+    c = _conn()
+    today = today or datetime.now(timezone.utc).date().isoformat()
+    cutoff = (datetime.fromisoformat(today) - timedelta(days=PICK_COOLDOWN_DAYS)).date().isoformat()
+    n = 0
+    for i, g in enumerate(rows, 1):
+        if not g.get("price"):
+            continue
+        recent = c.execute("SELECT 1 FROM gem_picks WHERE symbol = ? AND picked_on > ?", (g["symbol"], cutoff)).fetchone()
+        if recent:
+            continue
+        cur = c.execute("""INSERT OR IGNORE INTO gem_picks (symbol, picked_on, rank, score, catalyst_pts, price, spy)
+                           VALUES (?,?,?,?,?,?,?)""",
+                        (g["symbol"], today, i, g.get("score"), (g.get("parts") or {}).get("catalyst"), g["price"], spy_price))
+        n += cur.rowcount
+    c.commit()
+    return n
+
+
+def gem_picks_due(horizon, today=None):
+    """Picks old enough for this horizon ('1m'/'3m'/'6m') and not yet graded on it."""
+    today = today or datetime.now(timezone.utc).date().isoformat()
+    by = (datetime.fromisoformat(today) - timedelta(days=HORIZONS[horizon])).date().isoformat()
+    return [dict(r) for r in _conn().execute(
+        f"SELECT * FROM gem_picks WHERE graded_{horizon} IS NULL AND picked_on <= ? ORDER BY picked_on", (by,))]
+
+
+def grade_gem_pick(pick_id, horizon, ret, spy_ret):
+    c = _conn()
+    c.execute(f"UPDATE gem_picks SET ret_{horizon} = ?, spy_{horizon} = ?, graded_{horizon} = ? WHERE id = ?",
+              (ret, spy_ret, datetime.now(timezone.utc).isoformat(), pick_id))
+    c.commit()
+
+
+def gem_track_summary(catalyst_split=60):
+    """Per horizon: how many graded, average pick return, average SPY return,
+    how often the pick beat SPY -- overall and split by catalyst score, which
+    is the question the record exists to answer."""
+    c = _conn()
+    out = {"picks": c.execute("SELECT COUNT(*) n FROM gem_picks").fetchone()["n"],
+           "first_pick": (c.execute("SELECT MIN(picked_on) m FROM gem_picks").fetchone() or {})["m"],
+           "horizons": {}}
+    for h in HORIZONS:
+        def agg(where="1", *a):
+            r = c.execute(f"""SELECT COUNT(*) n, AVG(ret_{h}) ret, AVG(spy_{h}) spy,
+                                     AVG(CASE WHEN ret_{h} > spy_{h} THEN 1.0 ELSE 0.0 END) hit
+                              FROM gem_picks WHERE graded_{h} IS NOT NULL AND {where}""", a).fetchone()
+            return {"n": r["n"], "ret": round(r["ret"], 2) if r["ret"] is not None else None,
+                    "spy": round(r["spy"], 2) if r["spy"] is not None else None,
+                    "hit": round(r["hit"] * 100, 1) if r["hit"] is not None else None}
+        out["horizons"][h] = {"all": agg(), "high_catalyst": agg("catalyst_pts >= ?", catalyst_split),
+                              "low_catalyst": agg("(catalyst_pts < ? OR catalyst_pts IS NULL)", catalyst_split)}
+    return out
+
+
+def gem_picks_recent(limit=60):
+    return [dict(r) for r in _conn().execute(
+        "SELECT * FROM gem_picks ORDER BY picked_on DESC, rank ASC LIMIT ?", (int(limit),))]
+
+
+def activist_13d(symbol, days=180):
+    """Schedule 13D filings on file for this ticker inside the window -- the
+    site's own SEC watcher already collects these."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    rows = _conn().execute(
+        """SELECT reporting_person, percent, filed_at, form FROM filings
+           WHERE ticker = ? AND kind = '13d' AND form LIKE 'SC 13D%' AND COALESCE(filed_at, seen_at) >= ?
+           ORDER BY COALESCE(filed_at, seen_at) DESC""", (symbol.upper(), since)).fetchall()
+    if not rows:
+        return {"activist_13d": 0}
+    r = rows[0]
+    return {"activist_13d": len(rows), "activist_who": r["reporting_person"], "activist_pct": r["percent"],
+            "activist_filed": r["filed_at"]}
 
 
 def gems_last_scored():
