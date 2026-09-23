@@ -136,6 +136,20 @@ CREATE TABLE IF NOT EXISTS filings_seen (
 );
 """
 
+# The investing screen. One row per company from the last pass; the facts
+# and the notes are JSON so a rule change does not need a migration.
+GEMS_SQL = """
+CREATE TABLE IF NOT EXISTS gems (
+  symbol       TEXT PRIMARY KEY,
+  name         TEXT, sector TEXT, industry TEXT, exchange TEXT,
+  market_cap   REAL, price REAL,
+  score        INTEGER, value_pts INTEGER, growth_pts INTEGER, quality_pts INTEGER, setup_pts INTEGER,
+  facts        TEXT, notes TEXT, disqualified TEXT, verdict TEXT,
+  scored_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_gems_score ON gems(score DESC);
+"""
+
 INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_created ON headlines(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_noise_created ON headlines(is_noise, created_at DESC);
@@ -201,6 +215,7 @@ def _conn():
             if col not in hhave:
                 c.execute(f"ALTER TABLE halts ADD COLUMN {col} {ddl}")
         c.executescript(INDEX_SQL)          # only now are all columns present
+        c.executescript(GEMS_SQL)
         c.commit()
         _local.conn = c
     return c
@@ -1050,3 +1065,78 @@ def prune(keep_days=45):
     n = c.execute("DELETE FROM headlines WHERE created_at < ?", (cutoff,)).rowcount
     c.commit()
     return n
+
+
+# ---- the investing screen -----------------------------------------------------
+
+def upsert_gem(g):
+    c = _conn()
+    p = g.get("parts") or {}
+    c.execute(
+        """INSERT INTO gems (symbol, name, sector, industry, exchange, market_cap, price, score,
+                             value_pts, growth_pts, quality_pts, setup_pts, facts, notes,
+                             disqualified, verdict, scored_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(symbol) DO UPDATE SET name=excluded.name, sector=excluded.sector,
+             industry=excluded.industry, exchange=excluded.exchange, market_cap=excluded.market_cap,
+             price=excluded.price, score=excluded.score, value_pts=excluded.value_pts,
+             growth_pts=excluded.growth_pts, quality_pts=excluded.quality_pts,
+             setup_pts=excluded.setup_pts, facts=excluded.facts, notes=excluded.notes,
+             disqualified=excluded.disqualified, verdict=excluded.verdict, scored_at=excluded.scored_at""",
+        (g["symbol"], g.get("name"), g.get("sector"), g.get("industry"), g.get("exchange"),
+         g.get("market_cap"), g.get("price"), int(g.get("score") or 0),
+         int(p.get("value") or 0), int(p.get("growth") or 0), int(p.get("quality") or 0), int(p.get("setup") or 0),
+         json.dumps(g.get("facts") or {}), json.dumps(g.get("notes") or []),
+         g.get("disqualified"), g.get("verdict"), datetime.now(timezone.utc).isoformat()))
+    c.commit()
+
+
+def _gem_row(r):
+    d = dict(r)
+    d["facts"] = json.loads(d.get("facts") or "{}")
+    d["notes"] = json.loads(d.get("notes") or "[]")
+    d["parts"] = {"value": d.pop("value_pts", 0), "growth": d.pop("growth_pts", 0),
+                  "quality": d.pop("quality_pts", 0), "setup": d.pop("setup_pts", 0)}
+    return d
+
+
+def top_gems(limit=60, sector=None, size=None, small_cap=2e9, mid_cap=10e9):
+    sql = "SELECT * FROM gems WHERE disqualified IS NULL"
+    args = []
+    if sector:
+        sql += " AND sector = ?"
+        args.append(sector)
+    if size == "small":
+        sql += " AND market_cap < ?"; args.append(small_cap)
+    elif size == "mid":
+        sql += " AND market_cap >= ? AND market_cap < ?"; args.extend([small_cap, mid_cap])
+    elif size == "large":
+        sql += " AND market_cap >= ?"; args.append(mid_cap)
+    sql += " ORDER BY score DESC, market_cap ASC LIMIT ?"
+    args.append(min(int(limit), 300))
+    return [_gem_row(r) for r in _conn().execute(sql, args)]
+
+
+def gem(symbol):
+    r = _conn().execute("SELECT * FROM gems WHERE symbol = ?", (symbol.upper(),)).fetchone()
+    return _gem_row(r) if r else None
+
+
+def gem_counts():
+    c = _conn()
+    total = c.execute("SELECT COUNT(*) n FROM gems").fetchone()["n"]
+    passed = c.execute("SELECT COUNT(*) n FROM gems WHERE disqualified IS NULL").fetchone()["n"]
+    strong = c.execute("SELECT COUNT(*) n FROM gems WHERE disqualified IS NULL AND score >= 70").fetchone()["n"]
+    good = c.execute("SELECT COUNT(*) n FROM gems WHERE disqualified IS NULL AND score >= 55").fetchone()["n"]
+    return {"scored": total, "passed": passed, "strong": strong, "good": good}
+
+
+def gem_sectors():
+    return [r["sector"] for r in _conn().execute(
+        "SELECT sector, COUNT(*) n FROM gems WHERE disqualified IS NULL AND sector IS NOT NULL "
+        "GROUP BY sector ORDER BY n DESC")]
+
+
+def gems_last_scored():
+    r = _conn().execute("SELECT MAX(scored_at) m FROM gems").fetchone()
+    return r["m"] if r else None

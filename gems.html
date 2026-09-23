@@ -30,10 +30,10 @@
   .spacer { flex:1; }
   .stamp { font-size:12px; color:var(--faint); font-family:var(--mono); }
 
-  .wrap { max-width:1150px; margin:0 auto; padding:18px 16px 40px; }
-  .lede { color:var(--muted); font-size:13.5px; max-width:78ch; margin:0 0 6px; }
+  .wrap { max-width:1200px; margin:0 auto; padding:18px 16px 40px; }
+  .lede { color:var(--muted); font-size:13.5px; max-width:80ch; margin:0 0 6px; }
   .lede b { color:var(--ink); }
-  .caveat { color:var(--faint); font-size:12.5px; max-width:78ch; margin:0 0 18px;
+  .caveat { color:var(--faint); font-size:12.5px; max-width:80ch; margin:0 0 18px;
             border-left:2px solid var(--line); padding-left:11px; }
 
   .hero { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
@@ -48,65 +48,48 @@
           background:var(--surface); color:var(--muted); cursor:pointer; user-select:none; }
   .chip:hover { color:var(--ink); }
   .chip.on { background:var(--accent); color:#041008; border-color:var(--accent); font-weight:650; }
+  select { background:var(--surface-2); color:var(--ink); border:1px solid var(--line); border-radius:7px;
+           padding:5px 9px; font-size:12.5px; }
 
-  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:12px; }
-  .card { background:var(--surface); border:1px solid var(--line); border-radius:11px;
-          padding:13px 14px; display:flex; flex-direction:column; gap:9px; position:relative; }
-  .card.top { border-color:rgba(46,232,106,.45); box-shadow:0 0 0 1px rgba(46,232,106,.12) inset; }
-  .card.ran { opacity:.6; }
-  .row { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
-  a.tick { font-family:var(--mono); font-size:15px; font-weight:800; text-decoration:none;
-           padding:2px 8px; border-radius:5px; background:var(--surface-2); border:1px solid var(--line); }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:11px; overflow:hidden; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint);
+       font-weight:600; padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap;
+       position:sticky; top:0; z-index:1; background:var(--surface); }
+  td { padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr.row { cursor:pointer; }
+  tr.row:hover td { background:var(--surface-2); }
+  tr.detail td { background:#0A0A0A; padding:12px 14px 14px; }
+  td.num { font-family:var(--mono); text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .dim { color:var(--faint); } .up { color:var(--good); } .down { color:var(--bad); }
+  a.tick { font-family:var(--mono); font-size:13px; font-weight:800; text-decoration:none; padding:2px 7px;
+           border-radius:4px; background:var(--surface-2); border:1px solid var(--line); }
   a.tick:hover { border-color:var(--accent); color:var(--accent); }
-  .name { color:var(--muted); font-size:12.5px; flex:1; min-width:0; overflow:hidden;
-          text-overflow:ellipsis; white-space:nowrap; }
-  .price { font-family:var(--mono); font-weight:700; font-size:15px; }
-  .mv { font-family:var(--mono); font-weight:700; font-size:12.5px; padding:2px 7px; border-radius:4px; }
-  .mv.quiet { background:rgba(46,232,106,.12); color:var(--accent); }
-  .mv.stirring { background:rgba(255,176,32,.14); color:var(--warn); }
-  .mv.ran { background:rgba(240,74,74,.14); color:var(--bad); }
-  .mv small { font-weight:500; opacity:.8; }
-  .hl { font-size:13.5px; line-height:1.4; font-weight:500; }
-  .hl a { text-decoration:none; }
-  .hl a:hover { color:var(--accent); }
-  .meta { font-size:11.5px; color:var(--faint); font-family:var(--mono); display:flex; gap:10px; flex-wrap:wrap; }
-  .facts { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; font-size:12.5px;
-           border-top:1px solid var(--line); padding-top:9px; }
+  .name { color:var(--muted); font-size:12px; display:block; max-width:34ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .score { font-family:var(--mono); font-weight:800; font-size:16px; }
+  .score.s70 { color:var(--accent); } .score.s55 { color:var(--good); } .score.s40 { color:var(--ink); } .score.s0 { color:var(--muted); }
+  .bars { display:flex; gap:3px; margin-top:4px; }
+  .bars i { display:block; height:5px; border-radius:2px; background:var(--surface-2); position:relative; overflow:hidden; }
+  .bars i b { position:absolute; left:0; top:0; bottom:0; background:var(--accent); }
+  .bars i.g b { background:#8FD3FF; } .bars i.q b { background:#C79BFF; } .bars i.s b { background:var(--warn); }
+  .verdict { font-size:12px; color:var(--muted); }
+  .facts { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 14px; font-size:12.5px; margin:0 0 10px; }
   .facts .k { color:var(--faint); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; display:block; }
   .facts .v { font-family:var(--mono); font-weight:600; }
-  .fl.micro { color:#FF6B6B; } .fl.low { color:var(--accent); } .fl.mid { color:var(--ink); } .fl.large { color:var(--muted); }
-  .off.red { color:var(--bad); } .off.amber { color:var(--warn); } .off.clear { color:var(--good); } .off.unknown { color:var(--faint); }
-  .val { font-size:12.5px; border-top:1px solid var(--line); padding-top:9px; }
-  .val b { display:block; font-weight:650; margin-bottom:2px; }
-  .val b.cheap { color:var(--accent); } .val b.trap { color:var(--warn); } .val b.rich { color:var(--bad); }
-  .val ul { margin:0; padding-left:16px; color:var(--muted); }
-  .odds { font-size:12.5px; border-top:1px solid var(--line); padding-top:9px; }
-  .odds .pill { font-family:var(--mono); font-size:11px; font-weight:700; padding:2px 7px; border-radius:4px;
-                text-transform:uppercase; letter-spacing:.04em; margin-right:6px; }
-  .odds .pill.likely { background:rgba(46,232,106,.14); color:var(--accent); }
-  .odds .pill.coinflip { background:rgba(255,176,32,.14); color:var(--warn); }
-  .odds .pill.unlikely { background:rgba(240,74,74,.14); color:var(--bad); }
-  .odds .pill.unknown { background:var(--surface-2); color:var(--faint); }
-  .odds .t { color:var(--muted); }
-  .guard { font-size:12.5px; border-top:1px solid var(--line); padding-top:9px; }
-  .guard b { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); display:block; margin-bottom:3px; }
-  .guard.pass { color:var(--accent); }
-  .guard ul { margin:0; padding-left:16px; color:var(--bad); }
-  .guard ul li { color:var(--ink); }
-  .guard ul li::marker { color:var(--bad); }
-  .why { font-size:11px; color:var(--faint); font-family:var(--mono); }
-  .why span { color:var(--muted); }
-  .rankno { position:absolute; top:10px; right:12px; font-family:var(--mono); font-size:11px; color:var(--faint); }
-  .empty { padding:28px 16px; color:var(--muted); line-height:1.65; background:var(--surface);
-           border:1px solid var(--line); border-radius:11px; }
+  .why { font-size:13px; }
+  .why ul { margin:4px 0 0; padding-left:18px; }
+  .why li { margin:2px 0; }
+  .legend { font-size:11px; color:var(--faint); font-family:var(--mono); display:flex; gap:12px; flex-wrap:wrap; margin-top:8px; }
+  .legend i { display:inline-block; width:10px; height:5px; border-radius:2px; vertical-align:middle; margin-right:4px; background:var(--accent); }
+  .legend i.g { background:#8FD3FF; } .legend i.q { background:#C79BFF; } .legend i.s { background:var(--warn); }
+  .empty { padding:28px 16px; color:var(--muted); line-height:1.65; }
   .empty b { color:var(--ink); }
-  h2.sec { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);
-           margin:22px 0 10px; }
-  details.how { margin-top:22px; color:var(--muted); font-size:13px; max-width:80ch; }
+  .scroll { overflow:auto; }
+  details.how { margin-top:22px; color:var(--muted); font-size:13px; max-width:82ch; }
   details.how summary { cursor:pointer; color:var(--ink); font-weight:600; }
   details.how p { margin:8px 0; }
   details.how b { color:var(--ink); }
-  @media (max-width:600px) { .wrap { padding:14px 12px 30px; } .cards { grid-template-columns:1fr; } }
+  @media (max-width:700px) { .wrap { padding:14px 12px 30px; } .hide-sm { display:none; } }
 </style>
 </head>
 <body>
@@ -124,191 +107,135 @@
 </header>
 
 <div class="wrap">
-  <p class="lede">The <b>catalyst is out</b> and the <b>price hasn't moved</b>. Every card is a
-    Big News headline from the last few hours, scored positive, on a stock still sitting near the
-    price it had when the story landed — ranked by float, offering risk and how cheap the
-    business looks.</p>
-  <p class="caveat">"Quiet" is measured against the price at the headline, not asserted. A stock
-    can be quiet because nobody has read the story yet, or because everyone has and decided it
-    doesn't matter. The checklist underneath each card is there to tell those apart — read it.</p>
+  <p class="lede"><b>Good businesses the market isn't paying up for.</b> Every US-listed company over $300M,
+    scored on three plain tests — <b>cheap</b> for what it earns, <b>growing</b> at double digits, and
+    <b>really profitable</b> with a clean balance sheet — after hard gates that throw out anything losing money,
+    burning cash, shrinking, or drowning in debt. Small and mid caps get a few extra points for being hidden;
+    a big name that clears the bar is listed too.</p>
+  <p class="caveat">This is arithmetic on reported numbers, refreshed daily after the close. It is a place to
+    start reading, not a recommendation: it can't see a lawsuit, a customer leaving, or a CFO resigning next week.
+    Click a row for the full reasoning and the exact figures behind it.</p>
 
   <div class="hero" id="hero"></div>
 
   <div class="filters" id="filters">
-    <span class="chip on" data-f="all">All</span>
-    <span class="chip" data-f="quiet">Quiet only</span>
-    <span class="chip" data-f="lowfloat">Low float</span>
-    <span class="chip" data-f="cheap">Looks cheap</span>
-    <span class="chip" data-f="clean">No offering on file</span>
-    <span class="chip" data-f="pass">Passes safeguard</span>
-    <span class="chip" data-f="likely">Usually spikes</span>
+    <span class="chip on" data-size="">All sizes</span>
+    <span class="chip" data-size="small">Small &lt;$2B</span>
+    <span class="chip" data-size="mid">Mid $2–10B</span>
+    <span class="chip" data-size="large">Large &gt;$10B</span>
+    <select id="sector"><option value="">All sectors</option></select>
+    <span class="chip" data-min="70">Strong only</span>
   </div>
 
-  <div class="cards" id="cards"></div>
-  <div id="ranwrap"></div>
+  <div class="panel"><div class="scroll" id="list"></div></div>
+  <div class="legend"><span><i></i>value /30</span><span><i class="g"></i>growth /30</span><span><i class="q"></i>quality /30</span><span><i class="s"></i>hidden /10</span></div>
 
   <details class="how">
-    <summary>How a stock gets on this page</summary>
-    <p><b>1. A story.</b> A headline the classifier scored <span id="minimp"></span>+ (the Big News
-      threshold) and read as positive, on a real listed equity, inside the last
-      <span id="lookback"></span> hours.</p>
-    <p><b>2. No move yet.</b> The price at the headline is fixed — the grader's entry bar, or the
-      first bar after the story, or the prior close for overnight news — and the move since is the
-      test. Under ±<span id="quiet"></span>% is <b>quiet</b>. Past <span id="ran"></span>% at any
-      horizon and it's moved to the "already ran" list below: that one is a halt-chase, not a gem.</p>
-    <p><b>3. The checklist.</b> Float tier from the same cache the Halts tab uses; the SEC offering
-      check (shelves, PIPEs, priced deals); and the research panel's valuation read with the
-      specific facts that fed it (P/E, book, sales, analyst target, distance from the 52-week low).</p>
-    <p><b>4. Spike odds.</b> The site's own archive: every Big News headline it has graded in the
-      last <span id="hdays"></span> days in the same category and tone, and how many moved
-      <span id="spike"></span>%+ within the hour. <span id="likely"></span>%+ reads "usually spikes",
-      under <span id="unlikely"></span>% "usually nothing". Fewer than 8 graded stories in the category
-      and it falls back to all big positive stories and says so. It is a base rate, not a prediction.</p>
-    <p><b>5. Safeguard.</b> The reasons not to take it, each a measured fact: an offering or shelf on
-      file, a large float, a value-trap read, a category that usually does nothing, a quiet story older
-      than <span id="stale"></span> hours, or a headline that only just clears the Big News bar. A card
-      that passes every check is a clean setup — not a buy signal.</p>
-    <p><b>6. Rank.</b> Importance, plus points for quiet, low float, value and spike odds, minus points for
-      anything on file at EDGAR or a category that usually does nothing. The reasons are printed on the card. Refreshes every
-      <span id="refresh"></span> seconds in the background — the page never waits on a data feed.</p>
+    <summary>How the score works</summary>
+    <p><b>Gates first.</b> Out if trailing net margin is zero or negative, free cash flow is negative, revenue is
+      shrinking, debt is over twice equity, or there are no earnings to price. A story stock can't score its way in.</p>
+    <p><b>Value, up to 30.</b> P/E under 12 earns 12 points, under 18 earns 8, under 25 earns 5 only if growth is over 15%.
+      EV/EBITDA under 10 earns 8, under 15 earns 4. Free-cash-flow yield (cash generated per share over the price) of 6%+
+      earns 10, 3%+ earns 5.</p>
+    <p><b>Growth, up to 30.</b> Revenue growth of 20%+ earns 15, 10%+ earns 10, 5%+ earns 5. Earnings-per-share growth
+      of 20%+ earns 15, 10%+ earns 8.</p>
+    <p><b>Quality, up to 30.</b> Net margin 15%+ earns 10, 8%+ earns 6, positive earns 3. Return on equity 15%+ earns 8,
+      10%+ earns 4. Debt under half of equity earns 7, under equity earns 4. Current ratio of 1.5+ earns 5.</p>
+    <p><b>Hidden, up to 10.</b> Under $2B earns 4, under $10B earns 2. Trading in the bottom 30% of its 52-week range earns 3.
+      Analyst consensus target 20%+ above the price earns 3.</p>
+    <p><b>Reading it.</b> 70+ means all three tests passed at once — rare. 55+ means two clearly did. 40+ is one clear
+      strength. Everything else passed the gates and not much more. Numbers come from the latest reported annual figures
+      and the current price, so a company that just reported will move the next day.</p>
   </details>
 </div>
 
 <script>
 (function(){
-  var cards=document.getElementById('cards'), hero=document.getElementById('hero'),
-      ranwrap=document.getElementById('ranwrap'), stamp=document.getElementById('stamp');
-  var filter='all', data=null;
+  var list=document.getElementById('list'), hero=document.getElementById('hero'), stamp=document.getElementById('stamp');
+  var size='', sector='', minScore=0, data=null, open={};
 
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
   function money(v){ if(v==null||isNaN(v))return '—'; var n=+v,a=Math.abs(n);
-    if(a>=1e9)return '$'+(n/1e9).toFixed(2)+'B'; if(a>=1e6)return '$'+(n/1e6).toFixed(1)+'M';
-    return '$'+n.toFixed(2); }
-  function shares(v){ if(v==null||isNaN(v))return '—'; var n=+v;
-    if(n>=1e9)return (n/1e9).toFixed(2)+'B'; if(n>=1e6)return (n/1e6).toFixed(2)+'M';
-    if(n>=1e3)return (n/1e3).toFixed(0)+'K'; return String(n); }
-  function pct(v){ if(v==null||isNaN(v))return '—'; var n=+v; return (n>0?'+':'')+n.toFixed(2)+'%'; }
-  function ago(min){ if(min==null)return ''; if(min<60)return min+'m ago';
-    var h=Math.floor(min/60), m=min%60; return h+'h '+(m?m+'m ':'')+'ago'; }
-  function when(iso){ var d=new Date(iso); if(isNaN(d))return '';
-    return d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}); }
+    if(a>=1e12)return '$'+(n/1e12).toFixed(2)+'T'; if(a>=1e9)return '$'+(n/1e9).toFixed(2)+'B';
+    if(a>=1e6)return '$'+(n/1e6).toFixed(0)+'M'; return '$'+n.toFixed(2); }
+  function num(v,d,s){ return (v==null||isNaN(v))?'—':(+v).toFixed(d==null?1:d)+(s||''); }
+  function pct(v){ if(v==null||isNaN(v))return '—'; var n=+v; return (n>0?'+':'')+n.toFixed(1)+'%'; }
+  function when(iso){ var d=new Date(iso); if(isNaN(d))return ''; return d.toLocaleDateString([], {month:'short',day:'numeric'})+' '+d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}); }
+  function cls(s){ return s>=70?'s70':s>=55?'s55':s>=40?'s40':'s0'; }
+  function bar(v,max,c){ return '<i class="'+c+'" style="width:'+Math.round(80*max/30)+'px"><b style="width:'+Math.round(v/max*100)+'%"></b></i>'; }
 
-  function passes(g){
-    if(filter==='quiet') return g.status==='quiet';
-    if(filter==='lowfloat') return g.float && (g.float.tier==='micro'||g.float.tier==='low');
-    if(filter==='cheap') return g.value && ((g.value.points||0)>0);
-    if(filter==='clean') return g.offering && g.offering.severity==='clear';
-    if(filter==='pass') return g.passes===true;
-    if(filter==='likely') return g.odds_level==='likely';
-    return true;
-  }
-
-  function oddsWord(l){ return l==='likely'?'usually spikes':l==='coinflip'?'coin flip':l==='unlikely'?'usually nothing':'no history'; }
-  function valClass(read){ if(!read)return ''; if(read.indexOf('Looks cheap')===0)return 'cheap';
-    if(read.indexOf('Cheap multiple')===0)return 'trap'; if(read.indexOf('Looks expensive')===0)return 'rich'; return ''; }
-
-  function card(g, i, dim){
-    var st=g.status, label = st==='quiet' ? (g.waiting_for_open?'quiet · waits for open':'quiet')
-                    : st==='stirring' ? 'stirring' : 'already ran';
-    var fl=g.float, off=g.offering||{}, v=g.value||{};
-    var flHtml = fl && fl.shares!=null
-      ? '<span class="v fl '+esc(fl.tier||'')+'">'+shares(fl.shares)+(fl.is_float?'':' <small>(outstanding)</small>')+'</span>'
-        +'<span class="k">'+esc(fl.tier?fl.tier+' float':'float')+'</span>'
-      : '<span class="v dim">—</span><span class="k">float</span>';
-    return '<div class="card '+(i===0&&!dim?'top':'')+(dim?' ran':'')+'">'+
-      (dim?'':'<span class="rankno">#'+(i+1)+' · score '+esc(g.score)+'</span>')+
-      '<div class="row"><a class="tick" href="/?ticker='+encodeURIComponent(g.symbol)+'">'+esc(g.symbol)+'</a>'+
-        '<span class="name">'+esc(g.name||'')+'</span></div>'+
-      '<div class="row"><span class="price">'+money(g.price)+'</span>'+
-        '<span class="mv '+st+'">'+pct(g.move_pct)+' <small>since story · '+esc(label)+'</small></span>'+
-        (g.day_change_pct!=null?'<span class="meta">day '+pct(g.day_change_pct)+'</span>':'')+'</div>'+
-      '<div class="hl">'+(g.url?'<a href="'+esc(g.url)+'" target="_blank" rel="noopener">':'')+esc(g.headline)+(g.url?'</a>':'')+'</div>'+
-      '<div class="meta"><span>'+esc(when(g.at))+' · '+esc(ago(g.age_min))+'</span>'+
-        (g.source?'<span>'+esc(g.source)+'</span>':'')+
-        '<span>importance '+esc(g.importance)+'</span>'+
-        '<span>from '+money(g.entry)+' ('+esc(g.entry_how||'')+')</span></div>'+
-      (dim ? '' :
-      '<div class="facts">'+
-        '<div>'+flHtml+'</div>'+
-        '<div><span class="v off '+esc(off.severity||'unknown')+'">'+
-          esc(off.severity==='clear'?'Clear':off.severity==='red'?'Offering':off.severity==='amber'?'Shelf / resale':'Unknown')+
-          '</span><span class="k">offering check</span></div>'+
-        '<div><span class="v">'+money(g.market_cap)+'</span><span class="k">market cap</span></div>'+
-        '<div><span class="v">'+(g.year_low!=null?money(g.year_low)+' – '+money(g.year_high):'—')+'</span><span class="k">52-week range</span></div>'+
+  function detail(g){
+    var f=g.facts||{}, p=g.parts||{};
+    var pos=(f.price!=null&&f.year_low!=null&&f.year_high>f.year_low)?Math.round((f.price-f.year_low)/(f.year_high-f.year_low)*100):null;
+    function kv(k,v,c){ return '<div><span class="k">'+k+'</span><span class="v '+(c||'')+'">'+v+'</span></div>'; }
+    return '<div class="facts">'+
+      kv('Score', p.value+' value · '+p.growth+' growth · '+p.quality+' quality · '+p.setup+' hidden')+
+      kv('P/E', num(f.pe))+kv('EV / EBITDA', num(f.ev_ebitda))+kv('Price / sales', num(f.ps,2))+kv('Price / book', num(f.pb,2))+
+      kv('FCF yield', num(f.fcf_yield,1,'%'), f.fcf_yield>=3?'up':'')+
+      kv('Revenue growth', pct(f.rev_growth), f.rev_growth>0?'up':'down')+kv('EPS growth', pct(f.eps_growth), f.eps_growth>0?'up':'down')+
+      kv('Net margin', num(f.net_margin,1,'%'))+kv('Operating margin', num(f.op_margin,1,'%'))+kv('Return on equity', num(f.roe,1,'%'))+
+      kv('Debt / equity', num(f.debt_to_equity,2))+kv('Current ratio', num(f.current_ratio,2))+kv('Dividend yield', num(f.dividend_yield,2,'%'))+
+      kv('52-week range', money(f.year_low)+' – '+money(f.year_high)+(pos!=null?' <span class="dim">('+pos+'% up the range)</span>':''))+
+      kv('Analyst target', f.analyst_target!=null?money(f.analyst_target)+' <span class="'+(f.upside>0?'up':'down')+'">'+pct(f.upside)+'</span>':'—')+
+      kv('Industry', esc(g.industry||'—'))+
       '</div>'+
-      (off.text && off.severity!=='clear' ? '<div class="why" style="color:var(--muted)">'+esc(off.text)+'</div>' : '')+
-      '<div class="val"><b class="'+valClass(v.read)+'">'+esc(v.read||'No valuation read yet')+'</b>'+
-        (v.notes&&v.notes.length?'<ul>'+v.notes.map(function(n){return '<li>'+esc(n)+'</li>';}).join('')+'</ul>':'')+'</div>'+
-      '<div class="odds"><span class="pill '+esc(g.odds_level||'unknown')+'">'+esc(oddsWord(g.odds_level))+'</span>'+
-        '<span class="t">'+esc(g.odds||'')+(g.category_label?' ('+esc(g.category_label)+')':'')+'</span></div>'+
-      (g.passes ? '<div class="guard pass"><b>Safeguard</b>✓ passes every check — still not a buy signal, read the story</div>'
-                : '<div class="guard"><b>Safeguard — reasons not to</b><ul>'+(g.guard||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>')+
-      '<div class="why">why: <span>'+esc((g.why||[]).join(' · '))+'</span></div>')+
-    '</div>';
+      '<div class="why"><b>'+esc(g.verdict||'')+'</b><ul>'+(g.notes||[]).map(function(n){return '<li>'+esc(n)+'</li>';}).join('')+'</ul>'+
+      '<div class="dim" style="margin-top:8px;font-size:12px">Scored '+esc(when(g.scored_at))+' · <a href="/?ticker='+encodeURIComponent(g.symbol)+'">open the research panel for '+esc(g.symbol)+' →</a></div></div>';
   }
 
   function paint(){
     if(!data) return;
-    var gems=(data.gems||[]).filter(passes);
-    var quiet=(data.gems||[]).filter(function(g){return g.status==='quiet';}).length;
-    hero.innerHTML =
-      '<div class="stat"><div class="k">With a story</div><div class="v">'+esc(data.candidates||0)+'</div><div class="n">big + positive, last '+esc(data.lookback_hours)+'h</div></div>'+
-      '<div class="stat"><div class="k">Still quiet</div><div class="v">'+quiet+'</div><div class="n">under ±'+esc(data.quiet_band_pct)+'% since the story</div></div>'+
-      '<div class="stat"><div class="k">Stirring</div><div class="v">'+((data.gems||[]).length-quiet)+'</div><div class="n">moving, not gone</div></div>'+
-      '<div class="stat"><div class="k">Already ran</div><div class="v">'+esc((data.ran||[]).length)+'</div><div class="n">past '+esc(data.ran_pct)+'% — not gems</div></div>'+
-      (data.baseline && data.baseline.n ? '<div class="stat"><div class="k">Baseline</div><div class="v">'+esc(data.baseline.spike_rate)+'%</div><div class="n">of '+esc(data.baseline.n)+' big positive stories spiked '+esc(data.spike_pct)+'%+ ('+esc(data.history_days)+'d)</div></div>' : '')+
-      '<div class="stat"><div class="k">Market</div><div class="v text">'+(data.in_session?'Open':'Closed')+'</div><div class="n">'+(data.in_session?'quiet means quiet':'quiet names react at the open')+'</div></div>';
-    if(!data.enabled){
-      cards.innerHTML='<div class="empty"><b>Hidden gems is off.</b> It needs the FMP_API_KEY environment variable on the server — the same key the research panel and float lookups use.</div>';
+    var c=data.counts||{};
+    hero.innerHTML=
+      '<div class="stat"><div class="k">Companies scored</div><div class="v">'+esc(c.scored||0)+'</div><div class="n">US-listed, over $300M</div></div>'+
+      '<div class="stat"><div class="k">Pass the gates</div><div class="v">'+esc(c.passed||0)+'</div><div class="n">profitable, cash-positive, growing, not over-levered</div></div>'+
+      '<div class="stat"><div class="k">Good (55+)</div><div class="v">'+esc(c.good||0)+'</div><div class="n">two of three tests clearly passed</div></div>'+
+      '<div class="stat"><div class="k">Strong (70+)</div><div class="v">'+esc(c.strong||0)+'</div><div class="n">cheap, growing and profitable at once</div></div>'+
+      '<div class="stat"><div class="k">Last pass</div><div class="v text">'+(data.last_scored_at?esc(when(data.last_scored_at)):'—')+'</div><div class="n">'+(data.running?('running: '+(data.scored||0)+' of '+(data.universe||0)+' scored'):'refreshes daily after the close')+'</div></div>';
+    var sel=document.getElementById('sector');
+    if(sel.options.length<=1&&(data.sectors||[]).length){
+      (data.sectors||[]).forEach(function(s){ var o=document.createElement('option'); o.value=s; o.textContent=s; sel.appendChild(o); });
+    }
+    var rows=(data.gems||[]).filter(function(g){ return g.score>=minScore; });
+    if(!data.enabled){ list.innerHTML='<div class="empty"><b>Hidden Gems is off.</b> It needs the FMP_API_KEY environment variable on the server.</div>'; return; }
+    if(!rows.length){
+      list.innerHTML='<div class="empty">'+(c.scored?'Nothing matches those filters.':(data.running?'<b>First pass is running</b> — '+(data.scored||0)+' of '+(data.universe||0)+' companies scored so far. Rows appear as they pass.':'<b>First pass starts about two minutes after the server comes up</b> and takes around an hour. Check back.'))+'</div>';
       return;
     }
-    if(!data.checked_at){
-      cards.innerHTML='<div class="empty">First pass runs about a minute after the server starts. Check back shortly.</div>';
-      return;
-    }
-    if(!gems.length){
-      cards.innerHTML='<div class="empty">'+((data.gems||[]).length
-        ? 'Nothing matches that filter.'
-        : '<b>No quiet stories right now.</b> Either the last '+esc(data.lookback_hours)+' hours had no positive Big News on a listed stock, or everything that did print has already moved — see the list below.')+'</div>';
-    } else {
-      cards.innerHTML=gems.map(function(g,i){return card(g,i,false);}).join('');
-    }
-    var ran=data.ran||[];
-    ranwrap.innerHTML = ran.length
-      ? '<h2 class="sec">Already ran — the crowd got there ('+ran.length+')</h2><div class="cards">'+
-        ran.map(function(g,i){return card(g,i,true);}).join('')+'</div>'
-      : '';
-    stamp.textContent = data.checked_at ? 'checked '+when(data.checked_at)+(data.last_error?' · last pass failed':'') : '';
+    list.innerHTML='<table><thead><tr><th>#</th><th>Company</th><th class="hide-sm">Sector</th><th class="num">Mkt cap</th><th class="num">Price</th><th class="num">P/E</th><th class="num hide-sm">Rev growth</th><th class="num hide-sm">Net margin</th><th class="num hide-sm">FCF yield</th><th>Score</th></tr></thead><tbody>'+
+      rows.map(function(g,i){ var f=g.facts||{}, p=g.parts||{};
+        return '<tr class="row" data-s="'+esc(g.symbol)+'"><td class="num dim">'+(i+1)+'</td>'+
+          '<td><a class="tick" href="/?ticker='+encodeURIComponent(g.symbol)+'" onclick="event.stopPropagation()">'+esc(g.symbol)+'</a><span class="name">'+esc(g.name||'')+'</span></td>'+
+          '<td class="hide-sm">'+esc(g.sector||'—')+'</td><td class="num">'+money(g.market_cap)+'</td><td class="num">'+money(g.price)+'</td>'+
+          '<td class="num">'+num(f.pe)+'</td><td class="num hide-sm '+(f.rev_growth>0?'up':'down')+'">'+pct(f.rev_growth)+'</td>'+
+          '<td class="num hide-sm">'+num(f.net_margin,1,'%')+'</td><td class="num hide-sm">'+num(f.fcf_yield,1,'%')+'</td>'+
+          '<td><span class="score '+cls(g.score)+'">'+g.score+'</span><div class="bars">'+bar(p.value,30,'')+bar(p.growth,30,'g')+bar(p.quality,30,'q')+bar(p.setup,10,'s')+'</div><div class="verdict">'+esc(g.verdict||'')+'</div></td></tr>'+
+          (open[g.symbol]?'<tr class="detail"><td colspan="10">'+detail(g)+'</td></tr>':'');
+      }).join('')+'</tbody></table>';
+    stamp.textContent=data.last_scored_at?('scored '+when(data.last_scored_at)):'';
   }
 
-  function load(){
-    fetch('/api/gems').then(function(r){return r.json();}).then(function(j){
-      if(j.error){ cards.innerHTML='<div class="empty">'+esc(j.error)+'</div>'; return; }
-      data=j;
-      document.getElementById('minimp').textContent=j.min_importance;
-      document.getElementById('lookback').textContent=j.lookback_hours;
-      document.getElementById('quiet').textContent=j.quiet_band_pct;
-      document.getElementById('ran').textContent=j.ran_pct;
-      document.getElementById('refresh').textContent=j.refresh_seconds;
-      document.getElementById('hdays').textContent=j.history_days;
-      document.getElementById('spike').textContent=j.spike_pct;
-      document.getElementById('likely').textContent=j.likely_pct;
-      document.getElementById('unlikely').textContent=j.unlikely_pct;
-      document.getElementById('stale').textContent=Math.round((j.stale_minutes||240)/60);
-      paint();
-    }).catch(function(){ cards.innerHTML='<div class="empty">Could not reach the server.</div>'; });
-  }
-
+  list.addEventListener('click', function(e){
+    var tr=e.target.closest('tr.row'); if(!tr) return;
+    var s=tr.getAttribute('data-s'); open[s]=!open[s]; paint();
+  });
   document.getElementById('filters').addEventListener('click', function(e){
     var c=e.target.closest('.chip'); if(!c) return;
-    filter=c.getAttribute('data-f');
-    [].forEach.call(document.querySelectorAll('#filters .chip'), function(x){ x.classList.toggle('on', x===c); });
-    paint();
+    if(c.hasAttribute('data-size')){ size=c.getAttribute('data-size');
+      [].forEach.call(document.querySelectorAll('#filters .chip[data-size]'), function(x){ x.classList.toggle('on', x===c); }); load(); }
+    else if(c.hasAttribute('data-min')){ var on=c.classList.toggle('on'); minScore=on?+c.getAttribute('data-min'):0; paint(); }
   });
+  document.getElementById('sector').addEventListener('change', function(e){ sector=e.target.value; load(); });
 
-  load();
-  setInterval(load, 60000);
+  function load(){
+    var u='/api/gems?limit=80'+(size?'&size='+size:'')+(sector?'&sector='+encodeURIComponent(sector):'');
+    fetch(u).then(function(r){return r.json();}).then(function(j){
+      if(j.error){ list.innerHTML='<div class="empty">'+esc(j.error)+'</div>'; return; }
+      data=j; paint();
+    }).catch(function(){ list.innerHTML='<div class="empty">Could not reach the server.</div>'; });
+  }
+  load(); setInterval(load, 120000);
 })();
 </script>
 </body>

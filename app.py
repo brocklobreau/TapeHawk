@@ -296,7 +296,9 @@ def api_gems():
     # Memory only. The background pass does the fetching; this returns what it
     # last found, in the time it takes to serialise it.
     try:
-        return gems.snapshot()
+        return gems.snapshot(limit=int(request.args.get("limit", gems.TOP_N)),
+                             sector=(request.args.get("sector") or "").strip() or None,
+                             size=(request.args.get("size") or "").strip() or None)
     except Exception as e:
         log(f"gems page failed: {e}")
         return {"error": "Could not read the gems list."}, 500
