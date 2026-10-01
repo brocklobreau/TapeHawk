@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapehawk — snipe</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23050505'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%232EE86A'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg:#050505; --surface:#0E0E0E; --surface-2:#171717; --line:#262626;
+    --ink:#EDEDED; --muted:#9C9C9C; --faint:#6A6A6A;
+    --accent:#2EE86A; --good:#5DD98A; --bad:#F04A4A; --warn:#F2B134; --live:#2EE86A;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+         font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  a { color:inherit; }
+  header { position:sticky; top:0; z-index:20; background:rgba(5,5,5,.94);
+           backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+           padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
+  .brand span { color:var(--accent); }
+  .tabs { display:flex; gap:4px; flex-wrap:wrap; }
+  .tab { font-size:13px; padding:6px 13px; border-radius:7px; text-decoration:none;
+         color:var(--muted); border:1px solid transparent; }
+  .tab:hover { color:var(--ink); }
+  .tab.on { background:var(--surface-2); border-color:var(--line); color:var(--accent); font-weight:600; }
+  .spacer { flex:1; }
+  .stat { font-family:var(--mono); font-size:12px; color:var(--muted); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--faint); margin-right:5px; vertical-align:middle; }
+  .dot.ok { background:var(--live); box-shadow:0 0 8px var(--live); }
+  .dot.bad { background:var(--bad); }
+  .wrap { max-width:1150px; margin:0 auto; padding:18px 16px 40px; }
+  .lede { color:var(--muted); font-size:13.5px; max-width:76ch; margin:0 0 6px; }
+  .lede b { color:var(--ink); }
+  .caveat { color:var(--faint); font-size:12.5px; max-width:76ch; margin:0 0 18px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:11px; margin-bottom:14px; overflow:hidden; }
+  .panel > h2 { margin:0; padding:11px 14px; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; }
+  .panel > h2 .r { margin-left:auto; text-transform:none; letter-spacing:0; font-family:var(--mono); font-weight:400; color:var(--faint); font-size:11.5px; }
+  .pad { padding:14px; }
+  .ctl { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12.5px; color:var(--muted); }
+  .ctl label { display:flex; align-items:center; gap:5px; }
+  .ctl input[type=number] { width:58px; background:var(--surface-2); border:1px solid var(--line); color:var(--ink); border-radius:6px; padding:3px 6px; font-family:var(--mono); font-size:12px; }
+  button { background:var(--surface-2); color:var(--ink); border:1px solid var(--line); border-radius:7px; padding:5px 11px; font-size:12.5px; cursor:pointer; }
+  button:hover { border-color:var(--muted); }
+  .setups { display:grid; gap:10px; }
+  .card { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--surface-2); display:grid; grid-template-columns:150px 1fr 220px; gap:14px; align-items:center; transition:border-color .3s, box-shadow .3s; }
+  .card.near { border-color:var(--warn); box-shadow:0 0 0 1px var(--warn), 0 0 22px rgba(242,177,52,.25); }
+  .card.moving { border-color:var(--accent); box-shadow:0 0 0 1px rgba(46,232,106,.6); }
+  .card.halted { border-color:var(--bad); }
+  .card.reopened { border-color:var(--good); }
+  .card.faded, .card.fresh { opacity:.9; }
+  .card .sym { font-family:var(--mono); font-weight:700; font-size:22px; letter-spacing:.02em; }
+  .card .px { font-family:var(--mono); font-size:15px; color:var(--muted); }
+  .card .pct { font-family:var(--mono); font-size:22px; font-weight:700; }
+  .up { color:var(--good); } .down { color:var(--bad); } .flat { color:var(--muted); }
+  .card .head { font-size:13px; }
+  .card .meta { font-size:11.5px; color:var(--faint); font-family:var(--mono); margin-top:3px; display:flex; gap:10px; flex-wrap:wrap; }
+  .st { font-family:var(--mono); font-size:10.5px; padding:1px 7px; border-radius:999px; border:1px solid var(--line); text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .st.near { color:#000; background:var(--warn); border-color:var(--warn); }
+  .st.moving { color:#000; background:var(--accent); border-color:var(--accent); }
+  .st.halted { color:#fff; background:var(--bad); border-color:var(--bad); }
+  .st.reopened { color:#000; background:var(--good); border-color:var(--good); }
+  .st.cat { color:var(--ink); }
+  .band { font-family:var(--mono); font-size:11.5px; color:var(--muted); }
+  .band b { color:var(--ink); }
+  .meter { height:8px; border-radius:4px; background:#222; margin:6px 0 4px; position:relative; overflow:hidden; }
+  .meter > i { position:absolute; left:0; top:0; bottom:0; background:var(--accent); border-radius:4px; }
+  .card.near .meter > i { background:var(--warn); }
+  .card.halted .meter > i { background:var(--bad); }
+  .empty { color:var(--faint); padding:18px 14px; text-align:center; font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--faint); padding:8px 12px; border-bottom:1px solid var(--line); font-weight:600; }
+  td { padding:8px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td.num, th.num { text-align:right; font-family:var(--mono); white-space:nowrap; }
+  .tick { font-family:var(--mono); font-weight:700; }
+  .hl { font-size:11.5px; color:var(--faint); }
+  .events { font-family:var(--mono); font-size:12px; max-height:260px; overflow:auto; }
+  .events div { padding:4px 14px; border-bottom:1px solid var(--line); display:flex; gap:10px; }
+  .events .t { color:var(--faint); flex:0 0 62px; }
+  .events .k { flex:0 0 70px; }
+  .how { margin-top:20px; color:var(--muted); font-size:13px; max-width:86ch; }
+  .how summary { cursor:pointer; color:var(--ink); font-weight:600; }
+  .how p { margin:8px 0; }
+  .how code { font-family:var(--mono); font-size:12px; color:var(--ink); }
+  .grid2 { display:grid; grid-template-columns:1.4fr 1fr; gap:14px; }
+  @media (max-width:860px) { .grid2 { grid-template-columns:1fr; } .card { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">TAPEHAWK<span>.</span></div>
+  <nav class="tabs">
+    <a class="tab" href="/">Live</a>
+    <a class="tab" href="/halts">Halts</a>
+    <a class="tab" href="/filings">SEC Filings</a>
+    <a class="tab" href="/gems">Hidden Gems</a>
+    <a class="tab on" href="/snipe">Snipe</a>
+  </nav>
+  <div class="spacer"></div>
+  <div class="stat"><span><i class="dot" id="dotnews"></i>wire</span><span><i class="dot" id="dotpx"></i>prices</span><span id="nwatch">—</span></div>
+</header>
+
+<div class="wrap">
+  <p class="lede"><b>Before the halt.</b> A stock halts to the upside because it ran past its band — about
+  <b>10%</b> over its five-minute reference for most stocks above $3, <b>20%</b> under $3 — and sat there for fifteen
+  seconds. The headline saying so comes after. This page starts the clock at the <b>story</b>: every FDA approval,
+  buyout, contract win, trial result, partnership or other positive Big News headline the wire delivers becomes a setup,
+  its stock is watched tick by tick, and you see the move, the speed, and the distance to the band while the door is still open.</p>
+  <p class="caveat">Prices are IEX, one exchange's slice of the tape, polled every two seconds; the band is an estimate.
+  Nothing here places an order — you do, through your broker, or you don't. Most setups never move. The ones that do move fast.</p>
+
+  <section class="panel">
+    <h2>Alerts <span class="r" id="alertsr"></span></h2>
+    <div class="pad ctl">
+      <label><input type="checkbox" id="sound" checked> sound</label>
+      <label>beep when up <input type="number" id="movepct" value="3" step="0.5" min="0.5">% since the story</label>
+      <label>and when within <input type="number" id="nearpct" value="3" step="0.5" min="0.5">% of the band</label>
+      <button id="test">test sound</button>
+      <span id="amsg"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Live setups <span class="r" id="setupsr"></span></h2>
+    <div class="pad"><div class="setups" id="setups"><div class="empty">Waiting for a story.</div></div></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Today's setups, how they ended <span class="r" id="histr"></span></h2>
+      <div id="hist"><div class="empty">Nothing finished yet.</div></div>
+    </section>
+    <section class="panel">
+      <h2>Log</h2>
+      <div class="events" id="events"></div>
+    </section>
+  </div>
+
+  <details class="how">
+    <summary>How this works, and what it cannot do</summary>
+    <p><b>What becomes a setup.</b> A headline on one to three tickers that reads as FDA approval or clearance, a buyout
+      or merger agreement, a contract or order win, positive trial data, a strategic partnership — or anything the Live
+      tab already scores as Big News with a positive tone. Analyst notes, earnings, offerings, movers columns and
+      "why is X up" pieces are left out. Halt headlines are not setups; they are the thing this page is trying to beat.</p>
+    <p><b>The numbers.</b> <code>since story</code> is the latest trade against the price at the moment the story landed.
+      <code>last 60s</code> is the speed. The band is the LULD limit: the five-minute average price seen so far, plus the
+      band percentage for the stock's price tier (doubled in the first fifteen and last twenty-five minutes of the day).
+      <code>to band</code> is how much further it has to go before a halt. A stock that sits at the band for fifteen seconds
+      is paused for five minutes.</p>
+    <p><b>States.</b> <b>fresh</b>: story landed, nothing yet. <b>moving</b>: up the alert percentage since the story.
+      <b>near</b>: moving and within the alert distance of the band — this is the one. <b>halted</b>: the wire said so, the
+      exchange said so, or a running stock went silent for a minute. <b>reopened</b>: printed again after the halt, with the
+      reopen price against the story. <b>faded</b>: a mover that gave it back. Setups are watched for thirty minutes, then
+      filed below with how they ended.</p>
+    <p><b>What it cannot do.</b> It cannot see the whole tape: IEX is a slice, so a thin stock can look quiet here while
+      it trades elsewhere, and the first prints of a spike can show up a tick late. It cannot know the exchange's exact
+      reference price. It cannot tell you the reopen will be higher — Halthawk's backtest tab measures how often it is.
+      And it cannot buy. The seconds between "moving" and "near" are yours.</p>
+  </details>
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function pct(v){ if(v==null||isNaN(v))return '—'; var n=+v; return (n>0?'+':'')+n.toFixed(2)+'%'; }
+  function cls(v){ return v>0?'up':(v<0?'down':'flat'); }
+  function px(v){ return v==null?'—':(+v).toFixed(+v<1?4:2); }
+  function ago(s){ s=Math.max(0,Math.round(s)); return s<60? s+'s' : Math.floor(s/60)+'m '+(s%60)+'s'; }
+  function tm(iso){ var d=new Date(iso); return isNaN(d)?'':d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'}); }
+  var prefs={sound:true, move:3, near:3};
+  try { var p=JSON.parse(localStorage.getItem('snipe.prefs')||'{}'); for(var k in p) prefs[k]=p[k]; } catch(e){}
+  $('sound').checked=!!prefs.sound; $('movepct').value=prefs.move; $('nearpct').value=prefs.near;
+  function savePrefs(){ prefs={sound:$('sound').checked, move:+$('movepct').value||3, near:+$('nearpct').value||3}; try{ localStorage.setItem('snipe.prefs', JSON.stringify(prefs)); }catch(e){} }
+  ['sound','movepct','nearpct'].forEach(function(id){ $(id).addEventListener('change', savePrefs); });
+
+  // ---- sound: a short two-tone chirp; "near" is higher and longer ----
+  var actx=null;
+  function beep(kind){
+    if(!$('sound').checked) return;
+    try{
+      actx=actx||new (window.AudioContext||window.webkitAudioContext)();
+      var now=actx.currentTime, tones=kind==='near'?[[880,0],[1320,.12],[1760,.24]]:(kind==='halted'?[[440,0],[330,.15]]:[[660,0],[990,.12]]);
+      tones.forEach(function(t){ var o=actx.createOscillator(), g=actx.createGain(); o.type='sine'; o.frequency.value=t[0]; g.gain.setValueAtTime(0.0001, now+t[1]); g.gain.exponentialRampToValueAtTime(0.25, now+t[1]+0.01); g.gain.exponentialRampToValueAtTime(0.0001, now+t[1]+0.11); o.connect(g); g.connect(actx.destination); o.start(now+t[1]); o.stop(now+t[1]+0.12); });
+    }catch(e){}
+  }
+  $('test').onclick=function(){ beep('near'); $('amsg').textContent='that is the near-the-band sound'; };
+
+  // ---- client-side alert state: fire on the thresholds set here, once per setup per level ----
+  var fired={};
+  function judge(s){
+    var k=s.id, f=fired[k]||(fired[k]={});
+    var up=s.pct!=null&&s.pct>=prefs.move, near=up&&s.to_band_pct!=null&&s.to_band_pct<=prefs.near;
+    if(s.state==='halted'&&!f.halted){ f.halted=true; beep('halted'); }
+    else if(near&&!f.near){ f.near=true; beep('near'); }
+    else if(up&&!f.move){ f.move=true; beep('moving'); }
+  }
+
+  function card(s){
+    var up=s.pct!=null&&s.pct>=prefs.move, near=up&&s.to_band_pct!=null&&s.to_band_pct<=prefs.near;
+    var state=s.state==='halted'||s.state==='reopened'||s.state==='faded'?s.state:(near?'near':(up?'moving':'fresh'));
+    var fill=0;
+    if(s.band_pct&&s.pct!=null){ fill=Math.max(0,Math.min(100, s.pct/s.band_pct*100)); }
+    var bandtxt=s.band_price?'band ~<b>'+px(s.band_price)+'</b> ('+(s.band_pct||0).toFixed(0)+'%) · to band <b>'+pct(s.to_band_pct)+'</b>':'band —';
+    if(s.state==='halted') bandtxt='<b>HALTED</b> '+(s.halt_source?'('+esc(s.halt_source)+')':'')+(s.halted_ts?' · '+ago(Date.now()/1000-s.halted_ts)+' ago':'');
+    if(s.state==='reopened') bandtxt='reopened <b>'+px(s.reopen_price)+'</b> · '+pct(s.reopen_pct)+' vs the story';
+    return '<div class="card '+state+'" data-id="'+s.id+'">'+
+      '<div><div class="sym">'+esc(s.symbol)+'</div><div class="px">'+px(s.last)+'</div><div style="margin-top:4px"><span class="st '+state+'">'+state+'</span> <span class="st cat">'+esc(s.category)+'</span></div></div>'+
+      '<div><div class="head">'+(s.url?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener">':'')+esc(s.headline)+(s.url?'</a>':'')+'</div>'+
+      '<div class="meta"><span>story '+ago(s.age_s)+' ago · '+tm(s.story_at)+'</span><span>ref '+px(s.ref)+'</span><span>high '+px(s.high)+' ('+pct(s.peak_pct)+')</span>'+(s.importance?'<span>importance '+s.importance+'</span>':'')+(s.halts?'<span>halts '+s.halts+'</span>':'')+'</div>'+
+      '<div class="meter"><i style="width:'+fill.toFixed(0)+'%"></i></div><div class="band">'+bandtxt+'</div></div>'+
+      '<div style="text-align:right"><div class="pct '+cls(s.pct)+'">'+pct(s.pct)+'</div><div class="band">since the story</div><div class="band" style="margin-top:4px">last 60s <b class="'+cls(s.pct_60s)+'">'+pct(s.pct_60s)+'</b></div></div>'+
+    '</div>';
+  }
+
+  var lastEvent=null;
+  function paint(d){
+    var st=d.status||{};
+    $('dotnews').className='dot '+(st.running?'ok':'bad');
+    $('dotpx').className='dot '+(st.configured?(st.last_error?'bad':(st.polls?'ok':'')):'bad');
+    $('nwatch').textContent=(d.watching||[]).length+' watching · '+(st.setups||0)+' setups since boot'+(st.last_error?' · prices: '+st.last_error:'');
+    $('alertsr').textContent='server marks moving at '+d.rules.move_pct+'% and near at '+d.rules.near_band_pct+'% of the band; your beeps use the numbers here';
+    var w=d.watching||[];
+    w.forEach(judge);
+    // sort by what you'd want to look at first
+    var order={near:0,moving:1,halted:2,reopened:3,fresh:4,faded:5};
+    w.sort(function(a,b){ var A=a.pct!=null&&a.pct>=prefs.move, B=b.pct!=null&&b.pct>=prefs.move; var sa=a.state==='halted'||a.state==='reopened'||a.state==='faded'?a.state:(A?((a.to_band_pct!=null&&a.to_band_pct<=prefs.near)?'near':'moving'):'fresh'); var sb=b.state==='halted'||b.state==='reopened'||b.state==='faded'?b.state:(B?((b.to_band_pct!=null&&b.to_band_pct<=prefs.near)?'near':'moving'):'fresh'); return (order[sa]-order[sb])||((b.pct||0)-(a.pct||0)); });
+    $('setupsr').textContent=w.length?w.length+' watched · '+d.rules.watch_minutes+' minutes each':'';
+    $('setups').innerHTML=w.length?w.map(card).join(''):'<div class="empty">Waiting for a story. The wire delivers about one headline a minute in market hours; most are not setups.</div>';
+    var h=d.history||[];
+    $('histr').textContent=h.length?h.length+' finished':'';
+    $('hist').innerHTML=h.length?'<table><thead><tr><th>Story</th><th>Symbol</th><th class="num">Peak</th><th class="num">End</th><th>Halted</th><th class="num">Reopen</th><th>Ended</th></tr></thead><tbody>'+
+      h.map(function(s){ return '<tr><td><span class="hl">'+tm(s.story_at)+'</span><br>'+esc((s.headline||'').slice(0,70))+'</td><td><span class="tick">'+esc(s.symbol)+'</span><br><span class="st cat">'+esc(s.category)+'</span></td><td class="num '+cls(s.peak_pct)+'">'+pct(s.peak_pct)+'</td><td class="num '+cls(s.pct)+'">'+pct(s.pct)+'</td><td>'+(s.halts?'<span class="st halted">yes</span> '+esc(s.halt_source||''):'no')+'</td><td class="num '+cls(s.reopen_pct)+'">'+(s.reopen_price?px(s.reopen_price)+' '+pct(s.reopen_pct):'—')+'</td><td class="hl">'+esc(s.end_reason||'')+'</td></tr>'; }).join('')+'</tbody></table>':'<div class="empty">Nothing finished yet.</div>';
+    var ev=(d.events||[]).slice().reverse();
+    $('events').innerHTML=ev.length?ev.map(function(e){ return '<div><span class="t">'+tm(e.at)+'</span><span class="k st '+esc(e.kind)+'">'+esc(e.kind)+'</span><span><b class="tick">'+esc(e.symbol)+'</b> '+esc(e.text)+'</span></div>'; }).join(''):'<div class="empty">Quiet.</div>';
+  }
+  function load(){
+    fetch('/api/snipe',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ if(d&&!d.error) paint(d); }).catch(function(){ $('dotpx').className='dot bad'; });
+  }
+  load(); setInterval(load, 2000);
+})();
+</script>
+</body>
+</html>

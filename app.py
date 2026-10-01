@@ -31,6 +31,7 @@ import offerings
 import news_stream
 import outcomes
 import research
+import snipe
 import store
 
 app = Flask(__name__, static_folder=None)
@@ -304,22 +305,20 @@ def api_gems():
         return {"error": "Could not read the gems list."}, 500
 
 
-@app.route("/scoreboard")
-def scoreboard_page():
-    return send_from_directory(HERE, "scoreboard.html")
+@app.route("/snipe")
+def snipe_page():
+    return send_from_directory(HERE, "snipe.html")
 
 
-@app.route("/api/scoreboard")
-def api_scoreboard():
+@app.route("/api/snipe")
+def api_snipe():
+    """The live setups: stocks with a story that just landed, their move
+    since, and how close they are to the halt band. Polled by the page."""
     try:
-        days = min(max(int(request.args.get("days", 30)), 1), 365)
-    except ValueError:
-        days = 30
-    try:
-        return store.scoreboard(days=days)
+        return snipe.snapshot()
     except Exception as e:
-        log(f"scoreboard failed: {e}")
-        return {"error": "Could not build the scoreboard."}, 500
+        log(f"snipe failed: {e}")
+        return {"error": "Could not read the setups."}, 500
 
 
 @app.route("/api/status")
@@ -327,7 +326,7 @@ def api_status():
     return {"stream": news_stream.status(), "store": store.stats(),
             "filings": filings.status(), "halts": halts.status(),
             "floats": floats.status(), "offerings": offerings.status(),
-            "gems": gems.status(),
+            "gems": gems.status(), "snipe": snipe.status(),
             "now": datetime.now(timezone.utc).isoformat()}
 
 
@@ -434,6 +433,10 @@ def start_once():
             gems.start(log=log)
         except Exception as e:
             log(f"gems watcher failed to start (non-fatal): {e}")
+        try:
+            snipe.start(store, news_stream, log=log)
+        except Exception as e:
+            log(f"snipe watcher failed to start (non-fatal): {e}")
         log(f"tapehawk: started (pid {os.getpid()})")
 
 
