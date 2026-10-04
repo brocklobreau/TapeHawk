@@ -20,3 +20,6 @@ services:
         sync: false
       - key: FMP_API_KEY
         sync: false
+      # Optional: rtpr.io alert socket (all four press-release wires). Set in the dashboard only.
+      - key: RTPR_KEY
+        sync: false

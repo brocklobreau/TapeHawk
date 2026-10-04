@@ -128,6 +128,11 @@
     <div class="pad"><div class="setups" id="setups"><div class="empty">Waiting for a story.</div></div></div>
   </section>
 
+  <section class="panel">
+    <h2>The wires: who was first <span class="r" id="wiresr"></span></h2>
+    <div class="pad" id="wires"></div>
+  </section>
+
   <div class="grid2">
     <section class="panel">
       <h2>Today's setups, how they ended <span class="r" id="histr"></span></h2>
@@ -155,6 +160,14 @@
       exchange said so, or a running stock went silent for a minute. <b>reopened</b>: printed again after the halt, with the
       reopen price against the story. <b>faded</b>: a mover that gave it back. Setups are watched for thirty minutes, then
       filed below with how they ended.</p>
+    <p><b>The wires.</b> Press releases are read straight from the wire services' own feeds (GlobeNewswire and PR
+      Newswire by default, more with <code>WIRE_FEEDS</code>) every few seconds, and a release with a US ticker becomes a
+      headline here the same as one from the Benzinga socket — source named. When the same story arrives from two places
+      the pair is matched (same ticker, within fifteen minutes) and the lag is scored against the one that came second.
+      Business Wire and Accesswire do not publish an open all-releases feed; that is what <b>rtpr</b> adds — all four wires over
+      one socket, with <code>RTPR_KEY</code> set on the server and the "All articles" rule turned on in the rtpr dashboard.
+      Each rtpr alert carries only a link, so the article is fetched before it is judged; the Live tab shows which pipe it
+      came off ("rtpr · businesswire").</p>
     <p><b>What it cannot do.</b> It cannot see the whole tape: IEX is a slice, so a thin stock can look quiet here while
       it trades elsewhere, and the first prints of a spike can show up a tick late. It cannot know the exchange's exact
       reference price. It cannot tell you the reopen will be higher — Halthawk's backtest tab measures how often it is.
@@ -234,6 +247,14 @@
     $('histr').textContent=h.length?h.length+' finished':'';
     $('hist').innerHTML=h.length?'<table><thead><tr><th>Story</th><th>Symbol</th><th class="num">Peak</th><th class="num">End</th><th>Halted</th><th class="num">Reopen</th><th>Ended</th></tr></thead><tbody>'+
       h.map(function(s){ return '<tr><td><span class="hl">'+tm(s.story_at)+'</span><br>'+esc((s.headline||'').slice(0,70))+'</td><td><span class="tick">'+esc(s.symbol)+'</span><br><span class="st cat">'+esc(s.category)+'</span></td><td class="num '+cls(s.peak_pct)+'">'+pct(s.peak_pct)+'</td><td class="num '+cls(s.pct)+'">'+pct(s.pct)+'</td><td>'+(s.halts?'<span class="st halted">yes</span> '+esc(s.halt_source||''):'no')+'</td><td class="num '+cls(s.reopen_pct)+'">'+(s.reopen_price?px(s.reopen_price)+' '+pct(s.reopen_pct):'—')+'</td><td class="hl">'+esc(s.end_reason||'')+'</td></tr>'; }).join('')+'</tbody></table>':'<div class="empty">Nothing finished yet.</div>';
+    var W=d.wires||{}, ws=W.status||{}, sb=W.scoreboard||{}, feeds=ws.feeds||{};
+    var fl=Object.keys(feeds).map(function(k){ var f=feeds[k]; var det=('alerts' in f)?((f.connected?'connected':'disconnected')+' · '+(f.alerts||0)+' alerts · '+(f.fetched||0)+' fetched · '+(f.stored||0)+' stored'):((f.polls||0)+' polls · '+(f.stored||0)+' stored'); return '<span><i class="dot '+(f.ok?'ok':(f.errors||f.last_error?'bad':''))+'"></i>'+esc(k)+' <span class="hl">'+det+(f.last_error?' · '+esc(f.last_error):'')+'</span></span>'; }).join(' &nbsp; ');
+    $('wiresr').textContent=ws.running?((ws.stored||0)+' wire releases with a ticker stored · '+(ws.no_ticker||0)+' without one dropped · '+(ws.matched||0)+' matched to another source'):'wires not running';
+    var srcs=Object.keys(sb);
+    $('wires').innerHTML='<div class="stat" style="margin-bottom:10px">'+(fl||'<span class="hl">no feeds configured</span>')+'</div>'+
+      (srcs.length?'<table><thead><tr><th>Source</th><th class="num">Headlines</th><th class="num">First</th><th class="num">Second</th><th class="num">Median lag when second</th><th class="num">Worst</th><th>Latest matches</th></tr></thead><tbody>'+
+        srcs.sort(function(a,b){ return (sb[b].first||0)-(sb[a].first||0); }).map(function(k){ var r=sb[k]; return '<tr><td><b>'+esc(k)+'</b></td><td class="num">'+r.headlines+'</td><td class="num up">'+r.first+'</td><td class="num">'+r.second+'</td><td class="num">'+(r.median_lag_s==null?'—':r.median_lag_s+'s')+'</td><td class="num">'+(r.worst_lag_s==null?'—':r.worst_lag_s+'s')+'</td><td class="hl">'+(r.examples||[]).slice(0,3).map(function(e){ return '<div><b class="tick">'+esc(e.symbol)+'</b> '+e.lag_s+'s after '+esc(e.first)+' — '+esc(e.headline)+'</div>'; }).join('')+'</td></tr>'; }).join('')+'</tbody></table>'
+        :'<div class="empty">No story has arrived from two sources yet. When one does, this table says which source had it first and how far behind the other was. That number is what a paid feed has to beat.</div>');
     var ev=(d.events||[]).slice().reverse();
     $('events').innerHTML=ev.length?ev.map(function(e){ return '<div><span class="t">'+tm(e.at)+'</span><span class="k st '+esc(e.kind)+'">'+esc(e.kind)+'</span><span><b class="tick">'+esc(e.symbol)+'</b> '+esc(e.text)+'</span></div>'; }).join(''):'<div class="empty">Quiet.</div>';
   }
