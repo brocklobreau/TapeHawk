@@ -32,6 +32,7 @@ import news_stream
 import outcomes
 import research
 import snipe
+import wires
 import store
 
 app = Flask(__name__, static_folder=None)
@@ -315,7 +316,9 @@ def api_snipe():
     """The live setups: stocks with a story that just landed, their move
     since, and how close they are to the halt band. Polled by the page."""
     try:
-        return snipe.snapshot()
+        d = snipe.snapshot()
+        d["wires"] = {"status": wires.status(), "scoreboard": wires.scoreboard()}
+        return d
     except Exception as e:
         log(f"snipe failed: {e}")
         return {"error": "Could not read the setups."}, 500
@@ -326,7 +329,7 @@ def api_status():
     return {"stream": news_stream.status(), "store": store.stats(),
             "filings": filings.status(), "halts": halts.status(),
             "floats": floats.status(), "offerings": offerings.status(),
-            "gems": gems.status(), "snipe": snipe.status(),
+            "gems": gems.status(), "snipe": snipe.status(), "wires": wires.status(),
             "now": datetime.now(timezone.utc).isoformat()}
 
 
@@ -437,6 +440,10 @@ def start_once():
             snipe.start(store, news_stream, log=log)
         except Exception as e:
             log(f"snipe watcher failed to start (non-fatal): {e}")
+        try:
+            wires.start(log=log, publish=news_stream._publish)
+        except Exception as e:
+            log(f"wires failed to start (non-fatal): {e}")
         log(f"tapehawk: started (pid {os.getpid()})")
 
 

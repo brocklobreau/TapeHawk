@@ -273,6 +273,11 @@ def insert(article):
     return cur.rowcount > 0
 
 
+def id_for(alpaca_id):
+    r = _conn().execute("SELECT id FROM headlines WHERE alpaca_id = ?", (alpaca_id,)).fetchone()
+    return r["id"] if r else None
+
+
 def _row(r):
     d = dict(r)
     d["symbols"] = json.loads(d.get("symbols") or "[]")

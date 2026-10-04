@@ -203,6 +203,14 @@ def _handle(msg, log):
                f"{'; '.join(imp['reasons'])} **" if imp["big"] else "")
             + f" {headline[:96]}")
 
+    if fresh:
+        # the scoreboard: was the wire first, and by how much?
+        try:
+            import wires
+            article["id"] = store.id_for(article["alpaca_id"])
+            wires.note_arrival("benzinga", article["symbols"], headline, now.timestamp(), article.get("id"))
+        except Exception as e:
+            log(f"stream: wire scoreboard failed -- {e}")
     # Only push genuinely new, non-filler headlines to open pages. A repeat of
     # a corrected article should not make the feed jump.
     if fresh and not noise:
