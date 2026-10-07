@@ -8,11 +8,14 @@ five-minute reference price and sat there for fifteen seconds. By the time
 the wire says "halted on circuit breaker to the upside" the move has
 happened and the door is shut for five minutes.
 
-This module watches the step before that. The news socket is already in
-this process; every headline it delivers is judged here, and the ones that
-move stocks -- FDA approvals and clearances, buyouts, contract wins, trial
-results, partnerships, or anything the classifier already calls Big News
-with a positive tone -- become a SETUP. From the moment the story lands the
+This module watches the step before that. The site's one stream (bus.py:
+the press-release wires since v2 step 9; the Benzinga socket is off) is
+already in this process; every headline it delivers is judged here, and the
+ones that move stocks -- FDA approvals and clearances, buyouts, contract
+wins, trial results, partnerships, or anything the classifier already calls
+Big News with a positive tone -- become a SETUP. A piece written after the
+move ("Acme shares are trading higher after...", Benzinga's why-is-it-moving
+shape) never opens one: by then the move it describes has happened. From the moment the story lands the
 setup's stock is polled every couple of seconds for its latest trade, and
 the page shows, live: how far it has moved since the story, how fast it is
 moving right now, where the halt band is, and how close it is to it. The
@@ -20,11 +23,13 @@ page beeps when a setup starts moving and again when it is near the band.
 Whether to buy is the reader's call, through their own broker; this is the
 clock, not the trigger finger.
 
-Three ways a setup is seen to halt, fastest first: the wire's own halt
-headline (about a tenth of a second behind the event), the exchange's halt
-feed (the Halts tab's poller, authoritative, up to 45 seconds behind), and
-silence -- a stock that was running and has not printed for a minute. It
-reopens when it prints again or the exchange says so.
+Three ways a setup is seen to halt, fastest first: a halt headline on the
+stream (Benzinga's "halted on circuit breaker" pieces; with that socket off
+the wires send none, so this path is kept for the record and rarely fires),
+the exchange's halt feed (the Halts tab's poller, authoritative, up to 45
+seconds behind), and silence -- a stock that was running and has not
+printed for a minute. It reopens when it prints again or the exchange says
+so.
 
 Honesty about the prices: the free Alpaca feed is IEX, one exchange, a
 slice of the prints. A stock's last IEX trade can lag the market by a tick
@@ -81,7 +86,17 @@ KINDS = [
 EXCLUDE = re.compile(r"analyst|price target|upgrade|downgrade|\brating|initiates coverage|earnings|conference call|webcast|to present|presents? at|"
                      r"investor day|\bQ[1-4]\b|quarter|fiscal|full[- ]year|year-end|annual results|financial results|dividend|offering|pricing of|"
                      r"warrant|reverse split|compliance|delist|short report|lawsuit|class action|investigat|\bETF\b|what's going on|why .* (shares|stock)|"
-                     r"movers|top (gainers|losers)|\bresum", re.I)
+                     r"movers|top (gainers|losers)|\bresum|"
+                     # after-the-move pieces (v2 step 9): the move they describe has already happened, so they open nothing
+                     r"shares (are|were) (trading|moving) (higher|lower)|(shares|stock) (is|are|now) (trading )?(up|down|higher|lower)\b|"
+                     r"trading (higher|lower) (after|on|following|as)\b|\bWIIM\b|why (is|are) .* (up|down|moving|rising|falling|trading)|"
+                     r"here'?s why|[:\-–—]\s*what you need to know", re.I)
+# ... and the stock itself moving: "Acme Soars After", "Acme Shares Jump On". A business number moving in a real
+# release ("Acme Revenue Jumps On New Contract Win", "Sales Surge As ...") is news, not a piece about the move.
+MOVE_VERB = r"(soars?|surges?|jumps?|plunges?|tumbles?|spikes?|rall(?:y|ies)|falls?|sinks?) (?:after|on|following|as)\b"
+AFTER_MOVE = re.compile(MOVE_VERB, re.I)
+METRIC_MOVE = re.compile(r"\b(?:revenues?|sales|profits?|income|earnings|ebitda|margins?|volumes?|production|output|bookings|backlog|"
+                         r"orders|shipments|deliveries|subscribers|users|traffic|demand|costs?|prices?|yields?) " + MOVE_VERB, re.I)
 HALT_UP = re.compile(r"halt(?:ed|s)?\b.*?(?:to the )?upside|circuit breaker[^.]*?upside|halt(?:ed|s)?\b.*?\bup\s+\d", re.I)
 HALT_ANY = re.compile(r"\bhalt(?:ed|s)?\b|circuit breaker", re.I)
 HALT_DOWN = re.compile(r"downside|\bdown\s+\d", re.I)
@@ -125,6 +140,8 @@ def setup_kind(headline, symbols, importance=0, tone=None, big=False):
     if not headline or not symbols or len(symbols) > 3:
         return None
     if HALT_ANY.search(headline) or EXCLUDE.search(headline):
+        return None
+    if AFTER_MOVE.search(headline) and not METRIC_MOVE.search(headline):
         return None
     for name, rx in KINDS:
         if rx.search(headline):
@@ -424,8 +441,8 @@ def snapshot():
 
 # ---- threads ------------------------------------------------------------------------------
 
-def _listen(news_stream, log):
-    q = news_stream.subscribe()
+def _listen(stream, log):
+    q = stream.subscribe()
     while True:
         try:
             article = q.get(timeout=30)
@@ -446,7 +463,9 @@ def _poll_loop(store, log):
         time.sleep(POLL_S)
 
 
-def start(store, news_stream, log=print):
+def start(store, stream, log=print):
+    """stream: anything with subscribe() -> queue (bus.py; news_stream's
+    names point at it too)."""
     global _log
     _log = log
     if not configured():
@@ -455,6 +474,6 @@ def start(store, news_stream, log=print):
         if _state["running"]:
             return
         _state["running"] = True
-    threading.Thread(target=_listen, args=(news_stream, log), daemon=True, name="snipe-news").start()
+    threading.Thread(target=_listen, args=(stream, log), daemon=True, name="snipe-news").start()
     threading.Thread(target=_poll_loop, args=(store, log), daemon=True, name="snipe-poll").start()
     log("snipe: watching the wire for setups; prices every %.0fs" % POLL_S)

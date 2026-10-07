@@ -1,16 +1,24 @@
 """
 Tapehawk — real-time market headlines with instant company context.
 
-Two halves, deliberately joined: a live feed of Benzinga headlines arriving
-in ~0.15 seconds, and a research panel that answers "so what is this company
-and is it cheap" without leaving the page. Newsquawk does the first far
-better than this will (they have analysts on a live audio squawk); what they
-do not do is put the company's cash flow next to the headline.
+Two halves, deliberately joined: a live feed of headlines straight off the
+press-release wires (GlobeNewswire and PR Newswire polled every 3 s, all
+four wires through the rtpr socket), and a research panel that answers "so
+what is this company and is it cheap" without leaving the page. Newsquawk
+does the first far better than this will (they have analysts on a live
+audio squawk); what they do not do is put the company's cash flow next to
+the headline.
 
-Architecture note: the websocket consumer runs as a daemon thread in this
-process. Per message it parses one small JSON object, so unlike Bellwether's
-backtests it cannot meaningfully compete with request serving. If the feed
-ever gets dense this moves to its own service; nothing else would change.
+The Benzinga socket (news_stream.py) is off since v2 step 9: Halthawk
+trades the wires, and Benzinga's rewrite arrives minutes after them. Every
+headline goes out on one stream (bus.py): /api/stream for browsers and
+Halthawk, and the Snipe tab's own listener.
+
+Architecture note: the wire pollers and the rtpr socket run as daemon
+threads in this process. Per message they parse one small document, so
+unlike Bellwether's backtests they cannot meaningfully compete with request
+serving. If the feed ever gets dense this moves to its own service; nothing
+else would change.
 """
 import gzip
 import json
@@ -22,6 +30,7 @@ from datetime import datetime, timezone
 
 from flask import Flask, Response, redirect, request, send_from_directory
 
+import bus
 import earnings
 import filings
 import floats
@@ -114,8 +123,10 @@ def api_feed():
             search=(request.args.get("q") or "").strip() or None,
             min_importance=5 if request.args.get("big") == "1" else None,
         )
+        # "stream" is the wires now (v2 step 9): the Live tab's dot and
+        # Halthawk's feed poll both read it.
         return {"headlines": rows, "stats": store.stats(),
-                "stream": news_stream.status()}
+                "stream": wires.stream_status()}
     except Exception as e:
         log(f"feed failed: {e}")
         return {"error": "Could not read the feed."}, 500
@@ -123,8 +134,9 @@ def api_feed():
 
 @app.route("/api/article/<int:article_id>")
 def api_article(article_id):
-    """The story behind a headline: Benzinga's own summary and body. Fetched
-    on click rather than shipped with the feed, so the feed stays fast."""
+    """The story behind a headline: the release's first paragraph (or, on
+    the old Benzinga rows, Benzinga's own summary and body). Fetched on
+    click rather than shipped with the feed, so the feed stays fast."""
     row = store.get(article_id)
     if not row:
         return {"error": "Not found"}, 404
@@ -142,7 +154,7 @@ def api_stream():
     which would look to the user like the news stopped.
     """
     def gen():
-        q = news_stream.subscribe()
+        q = bus.subscribe()
         try:
             yield "retry: 3000\n\n"
             last_ping = time.time()
@@ -157,7 +169,7 @@ def api_stream():
         except GeneratorExit:
             pass
         finally:
-            news_stream.unsubscribe(q)
+            bus.unsubscribe(q)
 
     return Response(gen(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache",
@@ -318,6 +330,7 @@ def api_snipe():
     try:
         d = snipe.snapshot()
         d["wires"] = {"status": wires.status(), "scoreboard": wires.scoreboard()}
+        d["stream"] = wires.stream_status()
         return d
     except Exception as e:
         log(f"snipe failed: {e}")
@@ -326,7 +339,8 @@ def api_snipe():
 
 @app.route("/api/status")
 def api_status():
-    return {"stream": news_stream.status(), "store": store.stats(),
+    return {"stream": wires.stream_status(), "benzinga": news_stream.status(), "bus": bus.status(),
+            "store": store.stats(),
             "filings": filings.status(), "halts": halts.status(),
             "floats": floats.status(), "offerings": offerings.status(),
             "gems": gems.status(), "snipe": snipe.status(), "wires": wires.status(),
@@ -420,7 +434,9 @@ def start_once():
             store.resequence_all(log=log)
         except Exception as e:
             log(f"halt resequence skipped: {e}")
-        news_stream.start(log=log)
+        # v2 step 9: the Benzinga socket is not started. The wires below are
+        # the stream; news_stream stays importable for its status line.
+        log("benzinga socket: off -- the wires are the stream (v2 step 9)")
         _start_grader()
         # Started last and in its own thread: a slow or unreachable sec.gov
         # must not delay the headline socket coming up.
@@ -437,11 +453,11 @@ def start_once():
         except Exception as e:
             log(f"gems watcher failed to start (non-fatal): {e}")
         try:
-            snipe.start(store, news_stream, log=log)
+            snipe.start(store, bus, log=log)
         except Exception as e:
             log(f"snipe watcher failed to start (non-fatal): {e}")
         try:
-            wires.start(log=log, publish=news_stream._publish)
+            wires.start(log=log, publish=bus.publish)
         except Exception as e:
             log(f"wires failed to start (non-fatal): {e}")
         log(f"tapehawk: started (pid {os.getpid()})")

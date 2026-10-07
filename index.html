@@ -320,12 +320,14 @@
         (h.tone==='positive'?'+':'−')+'</span>' : '';
     var lat = (h.latency_ms!=null && h.latency_ms>=0 && h.latency_ms<60000)
       ? '<span class="lat">'+(h.latency_ms/1000).toFixed(2)+'s</span>' : '';
+    // the same release delivered twice by one source: shown, but said plainly
+    var copy = h.copy_of ? '<span class="tag" title="the same release, delivered a second time by the same source">copy</span>' : '';
     var title = h.url ? '<a href="'+esc(h.url)+'" target="_blank" rel="noopener noreferrer">'+esc(h.headline)+'</a>'
                       : esc(h.headline);
     var d=document.createElement('div');
     d.className='item'+(isNew?' new':'');
     d.setAttribute('data-id', h.id);
-    d.innerHTML='<div class="meta"><span class="time">'+esc(ago(h.created_at))+'</span>'+lat+tdot+tags+syms+'</div>'+
+    d.innerHTML='<div class="meta"><span class="time">'+esc(ago(h.created_at))+'</span>'+lat+tdot+copy+tags+syms+'</div>'+
                 '<div class="headline">'+title+'</div>'+
                 (h.source?'<div class="src">'+esc(h.source)+(h.author?' · '+esc(h.author):'')+'</div>':'')+
                 '<span class="expand">Read the story ▾</span>';
@@ -438,9 +440,13 @@
     fetch(u).then(function(r){return r.json();}).then(function(d){
       if(d.error){ feed.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
       paint(d.headlines||[], false);
+      // The stream is the wires (the Benzinga socket is off): the dot is
+      // green while any wire source is up, and the text says how many are.
       var s=d.stream||{}, st=d.stats||{};
       var best = st.best_latency_ms!=null ? (st.best_latency_ms/1000).toFixed(2)+'s best' : '';
+      var up=(s.sources_up||[]).length, all=(s.sources||[]).length;
       livetext.textContent = (s.connected?'live':'reconnecting') +
+        (all? ' · '+up+' of '+all+' wires':'') +
         (st.last_hour!=null? ' · '+st.last_hour+'/hr':'') + (best?' · '+best:'');
       dot.className='dot '+(s.connected?'on':'off');
     }).catch(function(){ livetext.textContent='offline'; dot.className='dot off'; });
@@ -454,8 +460,9 @@
     lookup(s.getAttribute('data-sym'));
   });
 
-  // Clicking a headline pulls the story behind it. Benzinga's own summary and
-  // body usually contain exactly the detail a headline cannot carry -- for a
+  // Clicking a headline pulls the story behind it: the release's first
+  // paragraph (or, on the old Benzinga rows, Benzinga's summary and body),
+  // which usually holds exactly the detail a headline cannot carry -- for a
   // deal headline, the structure of the deal. Fetched per article rather than
   // shipped with the feed so the feed stays fast.
   var storyCache = {};

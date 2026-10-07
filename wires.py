@@ -30,6 +30,20 @@ ticker on every release (law firms and private companies post too; those
 are dropped), or the whole text (the first paragraph, which is where the
 ticker lives). Business Wire and Accesswire do not publish an open
 all-releases feed; add one with WIRE_FEEDS if you have a URL that works.
+
+Since v2 step 9 (October 2026) the wires ARE the stream: the Benzinga
+socket is off, and every headline the site and Halthawk see came off a
+wire. Each one carries the wire's own publish time (wire_pub), the first
+paragraph, the rtpr article id and rtpr's impact block when it has one.
+Two things the same source can do twice are caught here, at ingest: rtpr
+sends a two-ticker release as two frames with one link (the second ticker
+is merged into the stored row, the article is fetched once), and it can
+deliver one release under two article ids (the second is stored and marked
+a copy of the first: the same stock with the same headline, or the same
+stock, wire, publish minute and first paragraph, within a minute). A copy
+always names the same stock: two companies' template headlines in one
+minute are two stories. The scoreboard skips same-source pairs by design,
+so it could not be used for that.
 """
 import html
 import os
@@ -43,6 +57,7 @@ from email.utils import parsedate_to_datetime
 
 import requests
 
+import bus
 import classify
 import store
 
@@ -52,6 +67,9 @@ POLL_S = float(os.environ.get("WIRE_POLL_S") or 3.0)
 BACKOFF_MAX = 60.0
 MATCH_WINDOW_S = 15 * 60               # same ticker within this long = the same story
 RECENT_KEEP = 2000
+COPY_WINDOW_S = 60                     # one source, two deliveries of one release this close = a copy
+COPY_OVERLAP = 0.5                     # ... when the headlines share half their words (and the stock)
+PARA_KEY_CHARS = 120                   # how much of the first paragraph the minute rule compares
 
 # name=url;name=url in WIRE_FEEDS replaces this list.
 DEFAULT_FEEDS = [
@@ -142,11 +160,30 @@ def parse_feed(xml_text):
 _lock = threading.Lock()
 _recent = deque(maxlen=RECENT_KEEP)        # {"ts", "source", "symbols", "tokens", "headline", "id"}
 _score = {}                                # source -> {"n", "first", "lags": deque, "examples": deque}
-_state = {"running": False, "feeds": {}, "stored": 0, "no_ticker": 0, "seen": 0, "matched": 0}
+_state = {"running": False, "feeds": {}, "stored": 0, "no_ticker": 0, "seen": 0, "matched": 0,
+          "copies": 0, "merged": 0, "last_stored_at": None}
+
+
+def _pub_minute(iso):
+    """The wire's publish minute as epoch seconds, or None."""
+    try:
+        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00")) if iso else None
+    except ValueError:
+        return None
+    if d is None:
+        return None
+    d = d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    return int(d.timestamp() // 60) * 60
 
 
 def _tokens(title):
     return {w for w in _WORD_RE.findall((title or "").lower()) if w not in _STOP and len(w) > 2}
+
+
+def _para_key(text):
+    """The start of a first paragraph, flattened, so two deliveries of one
+    release compare equal whatever the headline parse made of them."""
+    return re.sub(r"\s+", " ", (text or "").lower()).strip()[:PARA_KEY_CHARS]
 
 
 def _bucket(source):
@@ -207,11 +244,31 @@ def status():
     return s
 
 
+def stream_status():
+    """What the Live tab's dot and /api/feed['stream'] read now that the
+    wires are the stream: connected when any wire source is up (a poll
+    that answered, or the rtpr socket open), which sources, and when the
+    last release was stored. The Benzinga socket is off and says so."""
+    s = status()
+    up = sorted(k for k, f in s["feeds"].items() if f.get("ok"))
+    return {"source": "wires", "connected": bool(up), "running": s["running"],
+            "sources": sorted(s["feeds"]), "sources_up": up,
+            "stored": s["stored"], "copies": s["copies"], "merged": s["merged"],
+            "last_message_at": s.get("last_stored_at"),
+            "listeners": bus.listeners(), "benzinga": "off"}
+
+
 # ---- the pollers ------------------------------------------------------------------------
 
 class Source(threading.Thread):
     """What every wire source shares: a seen-set, the article shape, the
     store, the stream, the scoreboard. Subclasses get the releases."""
+    # Whether "same ticker, same wire, same publish minute, same first
+    # paragraph" makes a copy. True only for rtpr, whose header-line
+    # fallback can give one release two headlines; an RSS feed's headlines
+    # are the real ones, and its description is not the release's text.
+    COPY_BY_MINUTE = False
+
     def __init__(self, name, url, log, publish=None, on_article=None):
         super().__init__(name=f"wire-{name}", daemon=True)
         self.src, self.url, self.log = name, url, log
@@ -219,6 +276,7 @@ class Source(threading.Thread):
         self.seen = set()
         self.order = deque(maxlen=5000)
         self.primed = False
+        self.arrivals = deque(maxlen=200)          # this source's last releases, for the copy check
         with _lock:
             _state["feeds"][name] = {"url": url, "polls": 0, "not_modified": 0, "items": 0, "stored": 0, "errors": 0,
                                      "last_poll_at": None, "last_error": None, "last_status": None, "ok": False}
@@ -240,6 +298,40 @@ class Source(threading.Thread):
             self.seen.discard(self.order[0])
         return True
 
+    def _print(self, art):
+        """What the copy check compares: the headline's words, the tickers,
+        the wire, the publish minute and the start of the first paragraph."""
+        return {"tokens": _tokens(art["headline"]),
+                "symbols": {str(s).upper() for s in (art.get("symbols") or []) if s},
+                "wire": art.get("author") or self.src, "pub_min": _pub_minute(art.get("wire_pub")),
+                "para": _para_key(art.get("paragraph") or art.get("summary"))}
+
+    def copy_of(self, art, now_s):
+        """The id of this source's own earlier delivery of the same release
+        within COPY_WINDOW_S, or None. A copy always names the same stock
+        (two companies' template headlines -- "X to Present at the H.C.
+        Wainwright Conference", a law firm's "Encourages X Investors" run --
+        are two stories however alike they read). On a shared stock it is
+        the same headline (half the words shared) or, when rtpr's header-line
+        fallback gave one release two headlines, the same wire, publish
+        minute and first paragraph. A company's second release in the same
+        minute has its own paragraph, so it stays its own story. When only
+        one of the two deliveries carried a wire mark the wire is not held
+        against the pair."""
+        me = self._print(art)
+        for other in reversed(self.arrivals):
+            if now_s - other["ts"] > COPY_WINDOW_S:
+                break
+            if not (other["symbols"] & me["symbols"]):
+                continue
+            j = len(other["tokens"] & me["tokens"]) / max(1, len(other["tokens"] | me["tokens"]))
+            if j >= COPY_OVERLAP:
+                return other["id"]
+            if self.COPY_BY_MINUTE and me["pub_min"] is not None and other["pub_min"] == me["pub_min"] \
+                    and (other["wire"] == me["wire"] or self.src in (other["wire"], me["wire"])) \
+                    and me["para"] and other["para"] == me["para"]:
+                return other["id"]
+        return None
 
     def handle(self, items, now=None):
         """New items -> articles. Returns how many were stored."""
@@ -255,6 +347,9 @@ class Source(threading.Thread):
                     _state["no_ticker"] += 1
                 continue
             art = self.article(it, now)
+            first_id = self.copy_of(art, now.timestamp())
+            if first_id is not None:
+                art["copy_of"] = first_id                  # stored and sent with the mark; never a second story
             try:
                 fresh = store.insert(art)
             except Exception as e:
@@ -265,11 +360,16 @@ class Source(threading.Thread):
             stored += 1
             with _lock:
                 _state["stored"] += 1
+                _state["last_stored_at"] = now.isoformat()
+                if first_id is not None:
+                    _state["copies"] += 1
             art["id"] = store.id_for(art["alpaca_id"])
-            m = note_arrival(self.src, art["symbols"], art["headline"], now.timestamp(), art.get("id"))
+            self.arrivals.append(dict(self._print(art), ts=now.timestamp(), id=first_id if first_id is not None else art["id"]))
+            # a copy is not an arrival: the scoreboard would otherwise count the same release twice for this source
+            m = None if first_id is not None else note_arrival(self.src, art["symbols"], art["headline"], now.timestamp(), art.get("id"))
             self.log(f"wire [{self.src}] [{','.join(art['symbols'][:3])}]"
                      + (f" ** BIG {art['importance']} {str(art['tone']).upper()} **" if art["big"] else "")
-                     + (f" ({m['lag_s']:.0f}s after {m['first']})" if m else " (first)")
+                     + (f" (copy of #{first_id})" if first_id is not None else (f" ({m['lag_s']:.0f}s after {m['first']})" if m else " (first)"))
                      + f" {art['headline'][:96]}")
             if not art["is_noise"]:
                 if self.publish:
@@ -308,7 +408,13 @@ class Source(threading.Thread):
             "categories": cats, "category_labels": [classify.CATEGORY_LABEL[c] for c in cats],
             "is_noise": noise, "importance": imp["score"], "reasons": imp["reasons"], "big": imp["big"],
             "tone": tn["direction"], "tone_reasons": tn["reasons"], "impact_level": ip["level"], "impact_note": ip["note"],
-            "wire_pub": it["pub"],
+            # v2 step 9: what Halthawk reads off every release. wire_pub is
+            # the wire's own publish time; paragraph, rtpr_id and impact
+            # come only off the rtpr socket (an RSS description is not the
+            # release's first paragraph, and Halthawk's reader tells the two
+            # apart by whether paragraph is there); copy_of is set by handle().
+            "wire_pub": it["pub"], "paragraph": None,
+            "rtpr_id": it.get("rtpr_id"), "impact": it.get("impact") or None, "copy_of": None,
         }
 
 
@@ -336,6 +442,9 @@ class Feed(Source):
 
     def poll_once(self):
         text = self.fetch()
+        # A poll that answered, with news or with "nothing new", is this
+        # source being up; the stream dot on the Live tab reads it.
+        self._st(ok=True, last_poll_at=datetime.now(timezone.utc).isoformat())
         if text is None:
             self._st(not_modified=_state["feeds"][self.src]["not_modified"] + 1)
             return 0
@@ -353,8 +462,7 @@ class Feed(Source):
         while True:
             try:
                 self.poll_once()
-                self._st(polls=_state["feeds"][self.src]["polls"] + 1, last_poll_at=datetime.now(timezone.utc).isoformat(),
-                         last_error=None, ok=True)
+                self._st(polls=_state["feeds"][self.src]["polls"] + 1, last_error=None)
                 self.backoff = POLL_S
             except Exception as e:
                 msg = str(e)[:140]
@@ -434,11 +542,15 @@ def parse_rtpr_article(text):
 
 
 class RtprSocket(Source):
+    COPY_BY_MINUTE = True
+
     def __init__(self, log, publish=None, on_article=None):
         super().__init__("rtpr", RTPR_WS, log, publish, on_article)
         self.primed = True                              # a socket has no backlog: everything it sends is new
         self.sample_logged = False
-        self._st(connected=False, alerts=0, fetched=0, fetch_errors=0, reconnects=0)
+        self.pairs = set()                              # link|ticker frames already handled
+        self.pair_order = deque(maxlen=5000)
+        self._st(connected=False, alerts=0, fetched=0, fetch_errors=0, reconnects=0, merged=0)
 
     def fetch_article(self, url):
         sep = "&" if "?" in url else "?"
@@ -449,9 +561,11 @@ class RtprSocket(Source):
         return r.text
 
     def on_frame(self, msg, now=None):
-        """One alert frame -> one release (both tickers of a two-ticker
-        release arrive as two frames with the same link; the second is a
-        repeat). Returns the stored count."""
+        """One alert frame -> one release. Both tickers of a two-ticker
+        release arrive as two frames with the same link: the article is
+        fetched once, and the second frame's ticker is merged into the
+        stored row (the seen-set is keyed on link + ticker, so a frame is
+        a repeat only when both match). Returns the stored count."""
         if msg.get("type") == "ping":
             return None
         if msg.get("type") != "alert" or not msg.get("article_url"):
@@ -460,8 +574,36 @@ class RtprSocket(Source):
         self._bump("alerts")
         url = msg["article_url"]
         key = url.split("?", 1)[0]
+        tick = str(msg.get("ticker") or "").upper()
+        if not re.fullmatch(r"[A-Z]{1,5}", tick):
+            tick = ""
+        pair = f"{key}|{tick}"
+        if pair in self.pairs:
+            return 0                                                    # this very frame again
         if key in self.seen:
-            return 0
+            # the release is on file under its first ticker: merge this one in, no second fetch
+            self.pairs.add(pair)
+            self.pair_order.append(pair)
+            if len(self.pairs) > 5000:
+                self.pairs.discard(self.pair_order[0])
+            if not tick:
+                return 0
+            syms = None
+            try:
+                syms = store.add_symbol(f"rtpr:{key}", tick)
+            except Exception as e:
+                self.log(f"wire rtpr: could not add {tick} to {key}: {str(e)[:100]}")
+            if syms is not None:
+                self._bump("merged")
+                with _lock:
+                    _state["merged"] += 1
+                self.log(f"wire rtpr: {tick} added to the same release ({','.join(syms)})")
+                return 0
+            # The link was seen but no row holds it: the first frame named no
+            # ticker and the text named none, so the release was dropped. This
+            # frame names one, so the release gets its chance under it.
+            self.log(f"wire rtpr: {tick} frame for a release that was not stored; fetching it again under {tick}")
+            self.seen.discard(key)
         try:
             text = self.fetch_article(url)
             self._bump("fetched")
@@ -477,17 +619,24 @@ class RtprSocket(Source):
         if not art["headline"]:
             self.log(f"wire rtpr: no headline found in {key}")
             return 0
-        tick = str(msg.get("ticker") or "").upper()
-        syms = [t for t in [tick] if re.fullmatch(r"[A-Z]{1,5}", t)] or tickers_in(art["headline"] + " " + art["paragraph"])
+        syms = [tick] if tick else tickers_in(art["headline"] + " " + art["paragraph"])
+        # the article id the way Halthawk's archive fetcher names it: the frame's id, else the link's last part
+        rtpr_id = str(msg.get("article_id") or msg.get("id") or key.rstrip("/").rsplit("/", 1)[-1] or "") or None
         item = {"guid": key, "title": art["headline"], "link": key, "pub": msg.get("article_published_at"),
-                "description": art["paragraph"], "tickers": syms, "exchanges_seen": [], "wire": art["wire"],
+                "description": art["paragraph"], "tickers": syms, "exchanges_seen": [], "wire": art["wire"], "rtpr_id": rtpr_id,
                 "impact": {k: msg.get(k) for k in ("alert_kind", "impact_score", "impact_tier", "event_type", "impact_direction") if msg.get(k) is not None}}
-        return self.handle([item], now)
+        n = self.handle([item], now)
+        self.pairs.add(pair)
+        self.pair_order.append(pair)
+        if len(self.pairs) > 5000:
+            self.pairs.discard(self.pair_order[0])
+        return n
 
     def article(self, it, now):
         a = super().article(it, now)
         if it.get("wire"):
             a["author"] = it["wire"]                   # the page shows "rtpr · businesswire": which pipe it came off
+        a["paragraph"] = it["description"] or None     # the release's own first paragraph, as rtpr delivered it
         return a
 
     def run(self):

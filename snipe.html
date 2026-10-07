@@ -111,6 +111,9 @@
   its stock is watched tick by tick, and you see the move, the speed, and the distance to the band while the door is still open.</p>
   <p class="caveat">Prices are IEX, one exchange's slice of the tape, polled every two seconds; the band is an estimate.
   Nothing here places an order — you do, through your broker, or you don't. Most setups never move. The ones that do move fast.</p>
+  <p class="caveat" id="streamnote">The stories here come off the same stream the Live tab shows: the press-release wires only
+  (GlobeNewswire, PR Newswire, and all four wires through rtpr). The Benzinga socket is off since October 2026, so
+  nothing here is a rewrite of a release that came minutes earlier, and no "shares are trading higher" piece opens a setup.</p>
 
   <section class="panel">
     <h2>Alerts <span class="r" id="alertsr"></span></h2>
@@ -156,14 +159,17 @@
       <code>to band</code> is how much further it has to go before a halt. A stock that sits at the band for fifteen seconds
       is paused for five minutes.</p>
     <p><b>States.</b> <b>fresh</b>: story landed, nothing yet. <b>moving</b>: up the alert percentage since the story.
-      <b>near</b>: moving and within the alert distance of the band — this is the one. <b>halted</b>: the wire said so, the
-      exchange said so, or a running stock went silent for a minute. <b>reopened</b>: printed again after the halt, with the
+      <b>near</b>: moving and within the alert distance of the band — this is the one. <b>halted</b>: the
+      exchange said so, or a running stock went silent for a minute (the Benzinga "halted on circuit breaker" headline
+      used to be the fastest sign; with that socket off, the exchange's table and silence are what is left). <b>reopened</b>: printed again after the halt, with the
       reopen price against the story. <b>faded</b>: a mover that gave it back. Setups are watched for thirty minutes, then
       filed below with how they ended.</p>
     <p><b>The wires.</b> Press releases are read straight from the wire services' own feeds (GlobeNewswire and PR
       Newswire by default, more with <code>WIRE_FEEDS</code>) every few seconds, and a release with a US ticker becomes a
-      headline here the same as one from the Benzinga socket — source named. When the same story arrives from two places
-      the pair is matched (same ticker, within fifteen minutes) and the lag is scored against the one that came second.
+      headline here — source named. They are the whole stream now: the Benzinga socket is off. When the same story arrives
+      from two places the pair is matched (same ticker, within fifteen minutes) and the lag is scored against the one that
+      came second; the same release delivered twice by one source (rtpr sometimes sends two article ids for one release)
+      is marked a copy and counted once.
       Business Wire and Accesswire do not publish an open all-releases feed; that is what <b>rtpr</b> adds — all four wires over
       one socket, with <code>RTPR_KEY</code> set on the server and the "All articles" rule turned on in the rtpr dashboard.
       Each rtpr alert carries only a link, so the article is fetched before it is judged; the Live tab shows which pipe it
@@ -231,8 +237,10 @@
 
   var lastEvent=null;
   function paint(d){
-    var st=d.status||{};
-    $('dotnews').className='dot '+(st.running?'ok':'bad');
+    var st=d.status||{}, stream=d.stream||{};
+    // the "wire" dot: green while the shared stream has a wire source up (the Benzinga socket is off)
+    $('dotnews').className='dot '+(stream.connected?'ok':(st.running?'':'bad'));
+    $('dotnews').title=stream.connected?((stream.sources_up||[]).join(', ')+' up'):'no wire source is up';
     $('dotpx').className='dot '+(st.configured?(st.last_error?'bad':(st.polls?'ok':'')):'bad');
     $('nwatch').textContent=(d.watching||[]).length+' watching · '+(st.setups||0)+' setups since boot'+(st.last_error?' · prices: '+st.last_error:'');
     $('alertsr').textContent='server marks moving at '+d.rules.move_pct+'% and near at '+d.rules.near_band_pct+'% of the band; your beeps use the numbers here';
@@ -242,7 +250,7 @@
     var order={near:0,moving:1,halted:2,reopened:3,fresh:4,faded:5};
     w.sort(function(a,b){ var A=a.pct!=null&&a.pct>=prefs.move, B=b.pct!=null&&b.pct>=prefs.move; var sa=a.state==='halted'||a.state==='reopened'||a.state==='faded'?a.state:(A?((a.to_band_pct!=null&&a.to_band_pct<=prefs.near)?'near':'moving'):'fresh'); var sb=b.state==='halted'||b.state==='reopened'||b.state==='faded'?b.state:(B?((b.to_band_pct!=null&&b.to_band_pct<=prefs.near)?'near':'moving'):'fresh'); return (order[sa]-order[sb])||((b.pct||0)-(a.pct||0)); });
     $('setupsr').textContent=w.length?w.length+' watched · '+d.rules.watch_minutes+' minutes each':'';
-    $('setups').innerHTML=w.length?w.map(card).join(''):'<div class="empty">Waiting for a story. The wire delivers about one headline a minute in market hours; most are not setups.</div>';
+    $('setups').innerHTML=w.length?w.map(card).join(''):'<div class="empty">'+(stream.connected?'Waiting for a story. The wires release steadily from 4:00 ET and heavily around the open; most releases are not setups.':'No wire source is up right now, so no story can arrive. The dot above turns green when one answers.')+'</div>';
     var h=d.history||[];
     $('histr').textContent=h.length?h.length+' finished':'';
     $('hist').innerHTML=h.length?'<table><thead><tr><th>Story</th><th>Symbol</th><th class="num">Peak</th><th class="num">End</th><th>Halted</th><th class="num">Reopen</th><th>Ended</th></tr></thead><tbody>'+

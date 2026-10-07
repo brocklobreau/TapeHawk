@@ -1,3 +1,5 @@
 #!/bin/sh
+# Every test script, in name order; each prints its own "... ok" line last.
+# Globbed rather than listed so a new test file is never left off.
 cd "$(dirname "$0")"
-for t in test_filings13d test_gems3 test_snipe_tab test_wires; do python3 $t.py 2>&1 | tail -1; done
+for t in test_*.py; do python3 "$t" 2>&1 | tail -1; done

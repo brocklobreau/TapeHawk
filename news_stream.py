@@ -20,6 +20,15 @@ for v1: the work per message is parsing one small JSON object, so it cannot
 meaningfully compete with request serving the way Bellwether's backtests do.
 If volume ever grows, this moves to its own Render service and the only thing
 that changes is where it writes.
+
+OFF since v2 step 9 (October 2026). Halthawk trades the press-release
+wires only, and Benzinga's rewrite of a release arrives minutes after the
+wire has it (measured on day one: GlobeNewswire first 61-5, Benzinga about
+four minutes behind), so app.start_once no longer calls start(). The module
+stays importable and complete: status() still answers (it says the socket
+is off), and start() still works if anyone ever wants the Benzinga copy
+back for the record. The stream listeners moved to bus.py; the names here
+point at it so nothing that held news_stream.subscribe breaks.
 """
 import json
 import os
@@ -28,6 +37,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
+import bus
 import classify
 import store
 
@@ -40,6 +50,7 @@ BACKOFF_START = 1.0
 BACKOFF_MAX = 60.0
 
 _state = {
+    "enabled": False,        # v2 step 9: the socket is not started; the wires are the stream
     "connected": False,
     "last_message_at": None,
     "last_connect_at": None,
@@ -51,7 +62,6 @@ _state = {
     "filtered": 0,
 }
 _lock = threading.Lock()
-_listeners = []          # queues for server-sent events
 
 
 def status():
@@ -65,35 +75,16 @@ def status():
             s["seconds_since_last_message"] = round(age, 1)
         except ValueError:
             pass
+    if not s["enabled"]:
+        s["note"] = "Benzinga socket off since v2 step 9; the wires are the stream"
     return s
 
 
-def subscribe():
-    """Register an SSE listener. Returns a queue the caller drains."""
-    import queue
-    q = queue.Queue(maxsize=200)
-    with _lock:
-        _listeners.append(q)
-    return q
-
-
-def unsubscribe(q):
-    with _lock:
-        if q in _listeners:
-            _listeners.remove(q)
-
-
-def _publish(article):
-    """Push to every connected browser. A slow or dead client must never be
-    able to block the ingest loop, so a full queue drops the message for that
-    client rather than waiting -- they will pick it up on their next poll."""
-    with _lock:
-        targets = list(_listeners)
-    for q in targets:
-        try:
-            q.put_nowait(article)
-        except Exception:
-            pass
+# The stream's listeners live in bus.py now; these names stay so anything
+# that held them keeps working.
+subscribe = bus.subscribe
+unsubscribe = bus.unsubscribe
+_publish = bus.publish
 
 
 def _creds():
@@ -306,6 +297,10 @@ def run_forever(log=print):
 
 
 def start(log=print):
+    """Not called by app.start_once since v2 step 9. Kept whole so the
+    Benzinga copy can be switched back on for the record if ever wanted."""
+    with _lock:
+        _state["enabled"] = True
     t = threading.Thread(target=run_forever, args=(log,), daemon=True,
                          name="alpaca-news")
     t.start()

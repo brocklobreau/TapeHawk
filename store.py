@@ -202,7 +202,15 @@ def _conn():
                          ("impact_note", "TEXT"), ("graded_at", "TEXT"),
                          ("grade_symbol", "TEXT"), ("grade_entry", "REAL"),
                          ("move_15m", "REAL"), ("move_60m", "REAL"),
-                         ("grade_note", "TEXT")):
+                         ("grade_note", "TEXT"),
+                         # v2 step 9: what the wires know that Benzinga never
+                         # sent. wire_pub is the wire's own publish time (to the
+                         # minute), rtpr_id the rtpr article id, impact rtpr's
+                         # impact block as JSON, copy_of the id of the row this
+                         # one repeats (the same release delivered twice by the
+                         # same source).
+                         ("wire_pub", "TEXT"), ("rtpr_id", "TEXT"),
+                         ("impact", "TEXT"), ("copy_of", "INTEGER")):
             if col not in have:
                 c.execute(f"ALTER TABLE headlines ADD COLUMN {col} {ddl}")
         # Same treatment for filings. A database created by the 13D-only
@@ -256,8 +264,8 @@ def insert(article):
            (alpaca_id, created_at, received_at, latency_ms, headline, summary,
             author, source, url, symbols, categories, is_noise,
             importance, reasons, content, tone, tone_reasons,
-            impact_level, impact_note)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            impact_level, impact_note, wire_pub, rtpr_id, impact, copy_of)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (article.get("alpaca_id"), article["created_at"], article["received_at"],
          article.get("latency_ms"), article["headline"], article.get("summary"),
          article.get("author"), article.get("source"), article.get("url"),
@@ -268,9 +276,29 @@ def insert(article):
          json.dumps(article.get("reasons") or []),
          article.get("content"),
          article.get("tone"), json.dumps(article.get("tone_reasons") or []),
-         article.get("impact_level"), article.get("impact_note")))
+         article.get("impact_level"), article.get("impact_note"),
+         article.get("wire_pub"), article.get("rtpr_id"),
+         json.dumps(article["impact"]) if article.get("impact") else None,
+         article.get("copy_of")))
     c.commit()
     return cur.rowcount > 0
+
+
+def add_symbol(alpaca_id, symbol):
+    """Merge one more ticker into a stored headline's list (a two-ticker
+    release whose second ticker arrived as a second rtpr frame). Returns the
+    row's symbols afterwards, or None when there is no such row."""
+    c = _conn()
+    r = c.execute("SELECT id, symbols FROM headlines WHERE alpaca_id = ?", (alpaca_id,)).fetchone()
+    if not r:
+        return None
+    syms = json.loads(r["symbols"] or "[]")
+    sym = str(symbol or "").upper()
+    if sym and sym not in syms:
+        syms.append(sym)
+        c.execute("UPDATE headlines SET symbols = ? WHERE id = ?", (json.dumps(syms), r["id"]))
+        c.commit()
+    return syms
 
 
 def id_for(alpaca_id):
@@ -287,6 +315,19 @@ def _row(r):
     d["tone_reasons"] = json.loads(d.get("tone_reasons") or "[]")
     d["big"] = (d.get("importance") or 0) >= 5
     d["is_noise"] = bool(d.get("is_noise"))
+    # v2 step 9: the wire fields, present on every row (None where a row
+    # predates them or came from Benzinga). Only an rtpr row's summary is
+    # the release's own first paragraph; an RSS row's summary is the feed's
+    # description and Benzinga's was its own rewrite, so neither is called
+    # a paragraph (Halthawk's reader tells the shapes apart by this).
+    try:
+        d["impact"] = json.loads(d["impact"]) if d.get("impact") else None
+    except (TypeError, ValueError):
+        d["impact"] = None
+    d["wire_pub"] = d.get("wire_pub")
+    d["rtpr_id"] = d.get("rtpr_id")
+    d["copy_of"] = d.get("copy_of")
+    d["paragraph"] = d.get("summary") if d.get("source") == "rtpr" else None
     return d
 
 
@@ -304,7 +345,8 @@ def recent(limit=100, since_id=None, symbol=None, category=None,
     sql = ("SELECT id, alpaca_id, created_at, received_at, latency_ms, headline, "
            "summary, author, source, url, symbols, categories, is_noise, "
            "importance, reasons, tone, tone_reasons, impact_level, impact_note, "
-           "graded_at, grade_symbol, grade_entry, move_15m, move_60m, grade_note "
+           "graded_at, grade_symbol, grade_entry, move_15m, move_60m, grade_note, "
+           "wire_pub, rtpr_id, impact, copy_of "
            "FROM headlines WHERE 1=1")
     args = []
     if not include_noise:

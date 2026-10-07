@@ -16,6 +16,24 @@ assert K("Acme Q2 Earnings Beat", ["ACME"]) is None
 assert K("Acme Announces Something Vague But Big", ["ACME"], importance=6, tone="positive", big=True) == "big"
 assert K("Acme Announces Something Vague But Big", ["ACME"], importance=6, tone="negative", big=True) is None
 assert K("Five Stocks With FDA Approvals", ["A", "B", "C", "D"]) is None
+# v2 step 9: a piece written after the move never opens a setup, however good the news in it sounds
+for late in ("Acme Shares Are Trading Higher After FDA Approval Of Zedox",
+             "Acme Stock Is Up 40% After The Company Wins A $40 Million Navy Contract",
+             "Why Acme Shares Are Trading Higher Today",
+             "Acme Shares Trading Lower After Phase 3 Trial Meets Primary Endpoint",
+             "Acme Soars After Definitive Merger Agreement With Giant",
+             "Here's Why Acme Stock Is Moving: FDA Clearance For Its Monitor",
+             "Acme Stock Jumps On FDA Approval: What You Need To Know"):
+    assert K(late, ["ACME"], importance=7, tone="positive", big=True) is None, late
+    assert snipe.on_headline({"headline": late, "symbols": ["ACME"], "importance": 7, "tone": "positive", "big": True}) is None, late
+# ... while the release itself still does
+assert K("Acme Therapeutics Receives FDA Approval for Zedox in Adults", ["ACME"]) == "fda"
+assert K("Acme Wins $40 Million Navy Contract; Shares Outstanding Unchanged", ["ACME"]) == "contract"
+# a business number moving in a real release is news, not a piece about the stock's move
+assert K("Acme Revenue Jumps On New $40 Million Navy Contract", ["ACME"]) == "contract"
+assert K("Acme Sales Surge As Zedox Receives FDA Approval", ["ACME"]) == "fda"
+assert K("What You Need To Know About Acme's FDA Approval For Zedox", ["ACME"]) == "fda"
+assert K("Acme Jumps On FDA Approval For Zedox", ["ACME"]) is None                       # the stock as the subject: still refused
 
 # --- the band ---
 assert snipe.band_pct(5.0) == 10.0 and snipe.band_pct(1.5) == 20.0 and abs(snipe.band_pct(0.5) - 30.0) < 0.01
