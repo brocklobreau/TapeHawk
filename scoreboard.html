@@ -127,6 +127,12 @@
     <a class="tab" href="/gems">Hidden Gems</a>
     <a class="tab on" href="/scoreboard">Scoreboard</a>
   </nav>
+  <script>
+  // Tabs switched off (TAPEHAWK_TABS) are hidden from the nav.
+  fetch('/api/tabs').then(function(r){return r.json();}).then(function(t){
+    (t.off||[]).forEach(function(n){ document.querySelectorAll('nav.tabs a[href="/'+n+'"]').forEach(function(a){ a.remove(); }); });
+  }).catch(function(){});
+  </script>
   <div class="spacer"></div>
   <select id="days">
     <option value="7">Last 7 days</option>

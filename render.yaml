@@ -23,3 +23,10 @@ services:
       # Optional: rtpr.io alert socket (all four press-release wires). Set in the dashboard only.
       - key: RTPR_KEY
         sync: false
+      # Which optional tabs are on, as a comma list of halts, filings, gems.
+      # Empty = Halts, SEC Filings and Hidden Gems are off (their pages say so,
+      # their APIs answer 404, the EDGAR watcher and the gems screener do not
+      # run). The bot's halt record (/api/halts and the Nasdaq halt poller)
+      # keeps running whatever this says.
+      - key: TAPEHAWK_TABS
+        value: ""

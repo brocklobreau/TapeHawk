@@ -152,4 +152,4 @@ assert snap["sectors"] == ["Technology"] and snap["min_score"] == 58
 assert store.gems_rule_version() == gems.RULE_VERSION
 # a second pass overwrites rather than duplicates
 gems.run_pass(log=logs.append); assert store.gem_counts()["scored"] == 4
-print("ported rules ok:", logs[-1])
+print("last log:", logs[-1]); print("ported rules ok")

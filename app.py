@@ -43,6 +43,7 @@ import news_stream
 import outcomes
 import research
 import snipe
+import tabs
 import wires
 import store
 
@@ -110,6 +111,27 @@ def _compress(response):
 @app.route("/")
 def index():
     return send_from_directory(HERE, "index.html")
+
+
+# --- optional tabs (2026-10-07) ---------------------------------------------
+# Halts, SEC Filings and Hidden Gems are off unless TAPEHAWK_TABS names them
+# (tabs.py). An off tab's page is replaced by off.html, which says so and how
+# to turn it back on; its API answers 404 with the same words. The nav on
+# every page reads /api/tabs and hides the links to off tabs.
+
+@app.route("/api/tabs")
+def api_tabs():
+    return tabs.status()
+
+
+def _page_or_off(name, filename):
+    if not tabs.is_on(name):
+        return send_from_directory(HERE, "off.html")
+    return send_from_directory(HERE, filename)
+
+
+def _tab_off(name):
+    return {"error": tabs.off_message(name)}, 404
 
 
 @app.route("/api/feed")
@@ -218,11 +240,16 @@ def api_earnings():
 
 @app.route("/halts")
 def halts_page():
-    return send_from_directory(HERE, "halts.html")
+    return _page_or_off("halts", "halts.html")
 
 
 @app.route("/api/halts")
 def api_halts():
+    # ALWAYS answers, whatever the tabs say. Halthawk's halt_watch.py reads
+    # this every few seconds (limit=150&all=1) for the exchange's halt
+    # record: its hold clock, the halted-name refusal and the frozen-position
+    # rule depend on it. Switching the Halts TAB off stops the page and the
+    # FMP halt grading only, never the Nasdaq poller (halts.start) nor this.
     try:
         out = {"halts": store.recent_halts(
                     limit=int(request.args.get("limit", 120)),
@@ -255,6 +282,8 @@ def api_halts():
 def api_offerings():
     """The offering check: one ticker, its dilution-relevant filings from
     EDGAR, and a verdict. Live lookup, cached for half an hour."""
+    if not tabs.is_on("filings"):
+        return _tab_off("filings")
     raw = (request.args.get("ticker") or "").strip().upper()
     if not raw or len(raw) > 12 or not all(c.isalnum() or c in ".-" for c in raw):
         return {"error": "Enter a ticker symbol."}, 400
@@ -268,7 +297,7 @@ def api_offerings():
 
 @app.route("/filings")
 def filings_page():
-    return send_from_directory(HERE, "filings.html")
+    return _page_or_off("filings", "filings.html")
 
 
 @app.route("/stakes")
@@ -285,6 +314,8 @@ def stakes_moved():
 
 @app.route("/api/filings")
 def api_filings():
+    if not tabs.is_on("filings"):
+        return _tab_off("filings")
     try:
         ticker = (request.args.get("ticker") or "").strip() or None
         limit = int(request.args.get("limit", 100))
@@ -304,11 +335,13 @@ def api_filings():
 
 @app.route("/gems")
 def gems_page():
-    return send_from_directory(HERE, "gems.html")
+    return _page_or_off("gems", "gems.html")
 
 
 @app.route("/api/gems")
 def api_gems():
+    if not tabs.is_on("gems"):
+        return _tab_off("gems")
     # Memory only. The background pass does the fetching; this returns what it
     # last found, in the time it takes to serialise it.
     try:
@@ -323,6 +356,27 @@ def api_gems():
 @app.route("/snipe")
 def snipe_page():
     return send_from_directory(HERE, "snipe.html")
+
+
+@app.route("/scoreboard")
+def scoreboard_page():
+    """How the calls held up (store.scoreboard: graded rows, sqlite only).
+    scoreboard.html had been uploaded without its two routes; added with the
+    tabs work (2026-10-07) since the Scoreboard is one of the tabs always on."""
+    return send_from_directory(HERE, "scoreboard.html")
+
+
+@app.route("/api/scoreboard")
+def api_scoreboard():
+    try:
+        days = int(request.args.get("days", 30))
+    except (TypeError, ValueError):
+        return {"error": "Enter a number of days, for example 30."}, 400
+    try:
+        return store.scoreboard(days=max(1, min(days, 3650)))
+    except Exception as e:
+        log(f"scoreboard failed: {e}")
+        return {"error": "Could not read the scoreboard."}, 500
 
 
 @app.route("/api/snipe")
@@ -347,6 +401,7 @@ def api_status():
             "floats": floats.status(), "offerings": offerings.status(),
             "gems": gems.status(), "snipe": snipe.status(), "wires": wires.status(),
             "companies": companies.status(),
+            "tabs": tabs.status(),
             "now": datetime.now(timezone.utc).isoformat()}
 
 
@@ -364,25 +419,34 @@ _start_lock = threading.Lock()
 GRADE_INTERVAL_SECONDS = 300
 
 
+def _grade_once():
+    """One grading pass: the headlines always; the halts only while the Halts
+    tab is on (its tables are the only reader of the halt grades, and each
+    grade costs FMP calls). Split out of the loop so a test can run one pass."""
+    try:
+        outcomes.grade_pending(store, log=log)
+    except Exception as e:
+        log(f"outcome grading failed (non-fatal): {e}")
+    if not tabs.is_on("halts"):
+        return
+    try:
+        # Halts are graded on the same pass and the same bars, so the
+        # numbers on both pages are measured the same way and can honestly
+        # be compared with each other.
+        halts.grade_pending(store, outcomes, log=log)
+    except Exception as e:
+        # Grading is a reporting feature. It must never be able to take
+        # down ingest, which is the part that cannot be recovered later.
+        # Named separately from the headline grader above so a log line
+        # says which of the two actually failed.
+        log(f"halt grading failed (non-fatal): {e}")
+
+
 def _grader_loop():
     # Let the stream settle before competing for anything.
     time.sleep(45)
     while True:
-        try:
-            outcomes.grade_pending(store, log=log)
-        except Exception as e:
-            log(f"outcome grading failed (non-fatal): {e}")
-        try:
-            # Halts are graded on the same pass and the same bars, so the
-            # numbers on both pages are measured the same way and can honestly
-            # be compared with each other.
-            halts.grade_pending(store, outcomes, log=log)
-        except Exception as e:
-            # Grading is a reporting feature. It must never be able to take
-            # down ingest, which is the part that cannot be recovered later.
-            # Named separately from the headline grader above so a log line
-            # says which of the two actually failed.
-            log(f"halt grading failed (non-fatal): {e}")
+        _grade_once()
         time.sleep(GRADE_INTERVAL_SECONDS)
 
 
@@ -458,21 +522,29 @@ def start_once():
         # v2 step 9: the Benzinga socket is not started. The wires below are
         # the stream; news_stream stays importable for its status line.
         log("benzinga socket: off -- the wires are the stream (v2 step 9)")
+        # Optional tabs (2026-10-07): the EDGAR watcher and the gems screener
+        # run only while their tab is on. The halt poller runs whatever the
+        # tabs say: Halthawk reads /api/halts for the exchange's halt record.
+        ts = tabs.status()
+        log(f"tabs: on = {', '.join(ts['on']) or 'none'}, off = {', '.join(ts['off']) or 'none'} "
+            f"(set TAPEHAWK_TABS to change)")
         _start_grader()
         # Started last and in its own thread: a slow or unreachable sec.gov
         # must not delay the headline socket coming up.
-        try:
-            filings.start(store, log=log)
-        except Exception as e:
-            log(f"filings watcher failed to start (non-fatal): {e}")
+        if tabs.is_on("filings"):
+            try:
+                filings.start(store, log=log)
+            except Exception as e:
+                log(f"filings watcher failed to start (non-fatal): {e}")
         try:
             halts.start(store, log=log)
         except Exception as e:
             log(f"halt watcher failed to start (non-fatal): {e}")
-        try:
-            gems.start(log=log)
-        except Exception as e:
-            log(f"gems watcher failed to start (non-fatal): {e}")
+        if tabs.is_on("gems"):
+            try:
+                gems.start(log=log)
+            except Exception as e:
+                log(f"gems watcher failed to start (non-fatal): {e}")
         try:
             snipe.start(store, bus, log=log)
         except Exception as e:

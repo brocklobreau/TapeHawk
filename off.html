@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapehawk — tab switched off</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23050505'/%3E%3Cpath d='M18.5 5 9 18h6l-1.5 9L23 14h-6z' fill='%232EE86A'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg:#050505; --surface:#0E0E0E; --surface-2:#171717; --line:#262626;
+    --ink:#EDEDED; --muted:#9C9C9C; --faint:#6A6A6A;
+    --accent:#2EE86A; --good:#5DD98A; --bad:#F04A4A; --live:#2EE86A;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+         font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  a { color:inherit; }
+  header { position:sticky; top:0; z-index:20; background:rgba(5,5,5,.94);
+           backdrop-filter:blur(8px); border-bottom:1px solid var(--line);
+           padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .brand { font-weight:700; letter-spacing:-.02em; font-size:17px; }
+  .brand span { color:var(--accent); }
+  .tabs { display:flex; gap:4px; flex-wrap:wrap; }
+  .tab { font-size:13px; padding:6px 13px; border-radius:7px; text-decoration:none;
+         color:var(--muted); border:1px solid transparent; }
+  .tab:hover { color:var(--ink); }
+  .tab.on { background:var(--surface-2); border-color:var(--line); color:var(--accent);
+            font-weight:600; }
+  .spacer { flex:1; }
+
+  .wrap { max-width:1150px; margin:0 auto; padding:18px 16px 40px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:11px;
+           margin-bottom:16px; }
+  .panel > h2 { margin:0; padding:11px 14px; font-size:12px; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--muted); border-bottom:1px solid var(--line); }
+  .pad { padding:14px; }
+  .pad p { margin:0 0 10px; max-width:76ch; }
+  .pad p:last-child { margin-bottom:0; }
+  code { font-family:var(--mono); font-size:12.5px; background:var(--surface-2);
+         border:1px solid var(--line); border-radius:5px; padding:1px 5px; }
+  .back { color:var(--accent); text-decoration:none; }
+  .back:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">TAPEHAWK<span>.</span></div>
+  <nav class="tabs">
+    <a class="tab" href="/">Live</a>
+    <a class="tab" href="/halts">Halts</a>
+    <a class="tab" href="/filings">SEC Filings</a>
+    <a class="tab" href="/gems">Hidden Gems</a>
+    <a class="tab" href="/snipe">Snipe</a>
+  </nav>
+  <script>
+  // Tabs switched off (TAPEHAWK_TABS) are hidden from the nav.
+  fetch('/api/tabs').then(function(r){return r.json();}).then(function(t){
+    (t.off||[]).forEach(function(n){ document.querySelectorAll('nav.tabs a[href="/'+n+'"]').forEach(function(a){ a.remove(); }); });
+  }).catch(function(){});
+  </script>
+  <div class="spacer"></div>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+    <h2>Tab switched off</h2>
+    <div class="pad">
+      <p>The <b id="tabname">This</b> tab is switched off to keep TapeHawk light.</p>
+      <p>Turn it back on: set <code>TAPEHAWK_TABS</code> to include <code id="tabkey">its name</code>
+         in Render's Environment tab and redeploy.</p>
+      <p><a class="back" href="/">← Back to Live</a></p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // One file serves /halts, /filings and /gems: the tab's name comes from the path.
+  (function(){
+    var labels = {halts:'Halts', filings:'SEC Filings', gems:'Hidden Gems'};
+    var key = (location.pathname || '').replace(/^\/+|\/+$/g, '').toLowerCase();
+    if (labels[key]) {
+      document.getElementById('tabname').textContent = labels[key];
+      document.getElementById('tabkey').textContent = key;
+      document.title = 'Tapehawk — ' + labels[key] + ' tab switched off';
+    }
+  })();
+</script>
+</body>
+</html>

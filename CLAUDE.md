@@ -268,6 +268,55 @@ big and `recent(min_importance=5)` -- the rail -- leaves it out; a row
 with no exchange stored passes as before). Found 2026-10-07 while fixing
 the review: the scorer's verdict never reached the stored row.
 
+## Tabs switched off (2026-10-07)
+
+The owner asked to switch off the tabs not in use -- Halts, SEC Filings and
+Hidden Gems -- to keep TapeHawk light, and to be able to turn one back on
+without a code change. Live, Snipe and the Scoreboard are always on. The
+plan is `../tapehawk-tabs-plan.md`.
+
+- **The switch** is the env var `TAPEHAWK_TABS` (`tabs.py`): a comma list
+  of the optional tabs that are ON (`halts`, `filings`, `gems`; case and
+  spaces ignored, unknown names ignored). Unset or empty = all three off,
+  which is how `render.yaml` ships it. `tabs.on()` reads the variable on
+  every call (no caching); `is_on(name)`, `off()`, `status()` (= `/api/tabs`
+  and `/api/status["tabs"]`: on, off, always, how). To turn a tab on: set
+  `TAPEHAWK_TABS` in Render's Environment tab, for example
+  `halts,filings,gems`, then redeploy.
+- **What stays on for the bot, whatever the tabs say:** the Nasdaq halt
+  poller (`halts.start`, always started) and `/api/halts` (always answers;
+  Halthawk's `halt_watch.py` reads it every 5 s with `limit=150&all=1` for
+  the exchange's halt record -- its hold clock, the halted-name refusal and
+  the frozen-position rule depend on it). Also untouched: `/api/stream`,
+  `/api/feed`, the wires, the classifier, the Snipe tab, the scoreboard,
+  the Live page's research panel (`/api/lookup`, `/api/earnings`).
+- **What each switch stops.** `filings` off: the EDGAR watcher
+  (`filings.start` is not called) and `/api/filings` + `/api/offerings`
+  (404 with the plain words). `gems` off: the FMP screener pass
+  (`gems.start` is not called) and `/api/gems` (404). `halts` off: the
+  halts PAGE and the FMP halt grading (`_grade_once` skips
+  `halts.grade_pending`; the headline grader still runs) -- never the
+  poller, never `/api/halts`.
+- **Pages.** `/halts`, `/filings`, `/gems` serve `off.html` while their
+  tab is off: the same header and nav, one panel saying the tab is switched
+  off and how to turn it on, a link back to Live; the tab's name comes from
+  `location.pathname`, so one file serves all three. Every page with the
+  nav (`index.html`, `snipe.html`, `scoreboard.html`, `halts.html`,
+  `gems.html`, `filings.html`, `off.html`) has a short script right after
+  the nav that fetches `/api/tabs` and removes each link whose href is
+  `/<name>` for a name in `off`. The pages stay static.
+- **Boot log:** `tabs: on = ..., off = ... (set TAPEHAWK_TABS to change)`.
+- **Found while doing this:** `scoreboard.html` (the graded-calls page,
+  reading `/api/scoreboard?days=`) had been uploaded without its routes;
+  `app.py` now serves `/scoreboard` and `/api/scoreboard` (=
+  `store.scoreboard(days)`, sqlite only). The who-was-first wire scoreboard
+  is a different thing and stays on the Snipe tab (`/api/snipe["wires"]`).
+- **Tests:** `tests/test_tabs.py` -- with the variable unset the three
+  are off (pages 200 with "switched off", APIs 404 naming the tab,
+  `/api/halts` 200, `start_once` starts halts but not filings or gems,
+  `_grade_once` grades headlines but not halts); with
+  `halts, Filings ,gems` everything is on; with `halts` alone only halts.
+
 ## Tests
 
 `sh tests/run.sh` — plain scripts, temp sqlite, fakes for every network
