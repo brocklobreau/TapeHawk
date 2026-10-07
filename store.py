@@ -18,7 +18,10 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from datetime import datetime, timedelta, timezone
+
+import classify
 
 DB_PATH = os.environ.get("TAPEHAWK_DB", os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "data", "headlines.db"))
@@ -162,6 +165,23 @@ CREATE TABLE IF NOT EXISTS gem_picks (
 CREATE UNIQUE INDEX IF NOT EXISTS ix_gem_picks ON gem_picks(symbol, picked_on);
 """
 
+# The company-size cache (Big News rules, 2026-10-07): one row per ticker
+# from FMP's quote, read by companies.size_of on the wire thread (sqlite
+# only, never the network). `error` holds why FMP had nothing, so the
+# ticker is not asked again for a day.
+COMPANIES_SQL = """
+CREATE TABLE IF NOT EXISTS companies (
+  symbol      TEXT PRIMARY KEY,
+  name        TEXT,
+  market_cap  REAL,
+  price       REAL,
+  exchange    TEXT,
+  country     TEXT,
+  fetched_at  TEXT,
+  error       TEXT
+);
+"""
+
 INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_created ON headlines(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_noise_created ON headlines(is_noise, created_at DESC);
@@ -210,9 +230,16 @@ def _conn():
                          # one repeats (the same release delivered twice by the
                          # same source).
                          ("wire_pub", "TEXT"), ("rtpr_id", "TEXT"),
-                         ("impact", "TEXT"), ("copy_of", "INTEGER")):
+                         ("impact", "TEXT"), ("copy_of", "INTEGER"),
+                         # Big News rules (2026-10-07): dup_of is the id of
+                         # the row another SOURCE delivered first (the rail
+                         # shows a release once); market_cap and exchange
+                         # are the size the row was scored with.
+                         ("dup_of", "INTEGER"), ("market_cap", "REAL"),
+                         ("exchange", "TEXT")):
             if col not in have:
                 c.execute(f"ALTER TABLE headlines ADD COLUMN {col} {ddl}")
+        c.executescript(COMPANIES_SQL)
         # Same treatment for filings. A database created by the 13D-only
         # version already has this table, so CREATE TABLE IF NOT EXISTS leaves
         # it alone -- and idx_filings_kind below would then fail with "no such
@@ -264,8 +291,9 @@ def insert(article):
            (alpaca_id, created_at, received_at, latency_ms, headline, summary,
             author, source, url, symbols, categories, is_noise,
             importance, reasons, content, tone, tone_reasons,
-            impact_level, impact_note, wire_pub, rtpr_id, impact, copy_of)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            impact_level, impact_note, wire_pub, rtpr_id, impact, copy_of,
+            dup_of, market_cap, exchange)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (article.get("alpaca_id"), article["created_at"], article["received_at"],
          article.get("latency_ms"), article["headline"], article.get("summary"),
          article.get("author"), article.get("source"), article.get("url"),
@@ -279,7 +307,8 @@ def insert(article):
          article.get("impact_level"), article.get("impact_note"),
          article.get("wire_pub"), article.get("rtpr_id"),
          json.dumps(article["impact"]) if article.get("impact") else None,
-         article.get("copy_of")))
+         article.get("copy_of"),
+         article.get("dup_of"), article.get("market_cap"), article.get("exchange")))
     c.commit()
     return cur.rowcount > 0
 
@@ -313,7 +342,10 @@ def _row(r):
     d["reasons"] = json.loads(d.get("reasons") or "[]")
     d["has_content"] = bool(d.get("content"))
     d["tone_reasons"] = json.loads(d.get("tone_reasons") or "[]")
-    d["big"] = (d.get("importance") or 0) >= 5
+    # Big News rules (2026-10-07): a row scored with a non-US or
+    # over-the-counter exchange (or FMP's "no US listing", NONE) is never big
+    # whatever its score -- the same verdict importance() gives.
+    d["big"] = (d.get("importance") or 0) >= 5 and not classify.exchange_verdict(d.get("exchange"))
     d["is_noise"] = bool(d.get("is_noise"))
     # v2 step 9: the wire fields, present on every row (None where a row
     # predates them or came from Benzinga). Only an rtpr row's summary is
@@ -328,6 +360,12 @@ def _row(r):
     d["rtpr_id"] = d.get("rtpr_id")
     d["copy_of"] = d.get("copy_of")
     d["paragraph"] = d.get("summary") if d.get("source") == "rtpr" else None
+    # Big News rules (2026-10-07): the other source's first copy, and the
+    # company size the row was scored with ("$420M company" for the page).
+    d["dup_of"] = d.get("dup_of")
+    d["market_cap"] = d.get("market_cap")
+    d["exchange"] = d.get("exchange")
+    d["size_words"] = classify.size_words(d.get("market_cap"))
     return d
 
 
@@ -346,7 +384,7 @@ def recent(limit=100, since_id=None, symbol=None, category=None,
            "summary, author, source, url, symbols, categories, is_noise, "
            "importance, reasons, tone, tone_reasons, impact_level, impact_note, "
            "graded_at, grade_symbol, grade_entry, move_15m, move_60m, grade_note, "
-           "wire_pub, rtpr_id, impact, copy_of "
+           "wire_pub, rtpr_id, impact, copy_of, dup_of, market_cap, exchange "
            "FROM headlines WHERE 1=1")
     args = []
     if not include_noise:
@@ -366,8 +404,16 @@ def recent(limit=100, since_id=None, symbol=None, category=None,
         sql += " AND (headline LIKE ? OR summary LIKE ?)"
         args.extend([f"%{search}%", f"%{search}%"])
     if min_importance:
-        sql += " AND importance >= ?"
+        # The rail shows a release once: a copy a second source delivered
+        # (dup_of) is left out here, and so is a row scored with an exchange
+        # that is not a US one (TSX, SIX, OTC, FMP's NONE): the score stands
+        # but nothing there can be traded. An unknown exchange passes. The
+        # plain feed still shows every row.
+        us = sorted(classify.US_EXCHANGES)
+        sql += (" AND importance >= ? AND dup_of IS NULL"
+                f" AND (exchange IS NULL OR exchange = '' OR UPPER(exchange) IN ({','.join('?' * len(us))}))")
         args.append(int(min_importance))
+        args.extend(us)
     sql += " ORDER BY id DESC LIMIT ?"
     args.append(min(int(limit), 300))
     return [_row(r) for r in _conn().execute(sql, args)]
@@ -424,6 +470,170 @@ def backfill_importance(score_fn, tone_fn=None, impact_fn=None, log=print):
     c.commit()
     log(f"store: scored {done} headline(s) stored before importance existed")
     return done
+
+
+# --- Big News rules (2026-10-07): dups, company size, re-scoring ---------------
+
+def set_dup(article_id, first_id):
+    """Mark a row as the same release another source delivered first."""
+    if not article_id or not first_id or article_id == first_id:
+        return
+    c = _conn()
+    c.execute("UPDATE headlines SET dup_of = ? WHERE id = ?", (int(first_id), int(article_id)))
+    c.commit()
+
+
+def size_from(comp):
+    """(market_cap, exchange) to score with from a cached company row: None,
+    None when there is no row or the fetch failed; the exchange "NONE" when
+    FMP had no US listing for the ticker (that answer counts), so the row is
+    never big instead of staying at its un-sized score. The wire path and
+    the re-scorers both read the row through this."""
+    if not comp:
+        return None, None
+    if comp.get("error"):
+        if comp.get("exchange") == classify.NO_LISTING:
+            return None, classify.NO_LISTING
+        return None, None
+    return comp.get("market_cap"), comp.get("exchange")
+
+
+def company(symbol):
+    """The cached company row (dict) or None. One indexed read."""
+    sym = str(symbol or "").upper().strip()
+    if not sym:
+        return None
+    r = _conn().execute("SELECT * FROM companies WHERE symbol = ?", (sym,)).fetchone()
+    return dict(r) if r else None
+
+
+def upsert_company(symbol, name, market_cap, price, exchange, country, error=None):
+    c = _conn()
+    c.execute("""INSERT INTO companies (symbol, name, market_cap, price, exchange, country, fetched_at, error)
+                 VALUES (?,?,?,?,?,?,?,?)
+                 ON CONFLICT(symbol) DO UPDATE SET name=excluded.name, market_cap=excluded.market_cap,
+                   price=excluded.price, exchange=excluded.exchange, country=excluded.country,
+                   fetched_at=excluded.fetched_at, error=excluded.error""",
+              (str(symbol).upper().strip(), name, market_cap, price, exchange, country,
+               datetime.now(timezone.utc).isoformat(), error))
+    c.commit()
+
+
+def companies_count():
+    return _conn().execute("SELECT COUNT(*) n FROM companies WHERE error IS NULL").fetchone()["n"]
+
+
+def symbols_since(days=14):
+    """Every ticker on a headline from the last `days`, newest first, each
+    once. One query; the warm-up feeds it to the size queue."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    out, seen = [], set()
+    for r in _conn().execute("SELECT symbols FROM headlines WHERE created_at > ? ORDER BY id DESC", (since,)):
+        for s in json.loads(r["symbols"] or "[]"):
+            s = str(s or "").upper()
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+    return out
+
+
+def _rescore_rows(c, rows, score_fn, noise_fn=None, sizes=None):
+    """Re-run the scorer on rows (sqlite rows with id, headline, symbols,
+    categories, importance, is_noise). `sizes` caches company rows by
+    ticker. Returns (changed, turned_noise, skipped, last_error): a row the
+    scorer or the database choked on is counted and its error kept, never
+    silently dropped."""
+    sizes = {} if sizes is None else sizes
+    changed = noise = skipped = 0
+    last_err = None
+    for r in rows:
+        try:
+            syms = json.loads(r["symbols"] or "[]")
+            cats = json.loads(r["categories"] or "[]")
+            first = str(syms[0]).upper() if syms else None
+            comp = None
+            if first:
+                if first not in sizes:
+                    sizes[first] = company(first)
+                comp = sizes[first]
+            mc, ex = size_from(comp)
+            imp = score_fn(r["headline"], syms, cats, market_cap=mc, exchange=ex)
+            new_noise = None
+            if noise_fn is not None:
+                new_noise = 1 if noise_fn(r["headline"]) else 0
+            sets = ["importance = ?", "reasons = ?", "market_cap = ?", "exchange = ?"]
+            vals = [int(imp["score"]), json.dumps(imp["reasons"]), mc, ex]
+            if new_noise is not None:
+                sets.append("is_noise = ?")
+                vals.append(new_noise)
+                if new_noise and not r["is_noise"]:
+                    noise += 1
+            if int(imp["score"]) != int(r["importance"] or 0):
+                changed += 1
+            vals.append(r["id"])
+            c.execute(f"UPDATE headlines SET {', '.join(sets)} WHERE id = ?", vals)
+        except Exception as e:
+            skipped += 1
+            last_err = f"#{r['id']}: {str(e)[:80]}"
+    return changed, noise, skipped, last_err
+
+
+def rescore_symbol(symbol, hours=48, score_fn=None):
+    """A size landed for this ticker: re-run the scorer on its rows from the
+    last `hours` WITH the size and exchange (tone and impact untouched).
+    Returns how many rows changed importance."""
+    sym = str(symbol or "").upper().strip()
+    if not sym or score_fn is None:
+        return 0
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    c = _conn()
+    rows = c.execute("SELECT id, headline, symbols, categories, importance, is_noise FROM headlines "
+                     "WHERE symbols LIKE ? AND created_at > ?", (f'%"{sym}"%', since)).fetchall()
+    if not rows:
+        return 0
+    comp = company(sym)
+    sizes = {sym: comp}
+    # rows whose FIRST ticker is another company keep that company's size
+    changed, _, _, _ = _rescore_rows(c, rows, score_fn, None, sizes)
+    c.commit()
+    return changed
+
+
+def rescore_recent(days=30, score_fn=None, log=print, noise_fn=None, batch=200, pause_s=0.25):
+    """Re-run the noise check and the scorer (with the cached size when there
+    is one) on the last `days` of rows, in batches of `batch` with a short
+    sleep between them, so a rule change cleans the archive after a deploy
+    without holding the database lock for long (the wire thread inserts
+    rows meanwhile). Returns {rows, changed, noise, skipped, last_error}:
+    `skipped` rows could not be re-scored (the error is in last_error), so
+    the owner can tell a clean pass from one that dropped rows."""
+    if score_fn is None:
+        score_fn = classify.importance
+    if noise_fn is None:
+        noise_fn = classify.is_noise
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    c = _conn()
+    sizes = {}
+    total = changed = noise = skipped = 0
+    last_err = None
+    last_id = 0
+    while True:
+        rows = c.execute("SELECT id, headline, symbols, categories, importance, is_noise FROM headlines "
+                         "WHERE created_at > ? AND id > ? ORDER BY id LIMIT ?", (since, last_id, int(batch))).fetchall()
+        if not rows:
+            break
+        ch, nz, sk, err = _rescore_rows(c, rows, score_fn, noise_fn, sizes)
+        c.commit()
+        total += len(rows); changed += ch; noise += nz; skipped += sk
+        last_err = err or last_err
+        last_id = rows[-1]["id"]
+        if len(rows) < batch:
+            break
+        if pause_s:
+            time.sleep(pause_s)
+    tail = f"; {skipped} skipped (last: {last_err})" if skipped else ""
+    log(f"store: re-scored {total} row(s) from the last {days} days; {changed} changed importance, {noise} turned noise{tail}")
+    return {"rows": total, "changed": changed, "noise": noise, "skipped": skipped, "last_error": last_err}
 
 
 def ungraded(cutoff_iso, limit=25):

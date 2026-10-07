@@ -128,6 +128,146 @@ rtpr's impact block. See "v2 step 9" below.
   so the request hook starts no threads). `test_snipe_tab.py`: seven
   after-the-move headlines open no setup, the releases still do.
 
+## Big News rules (2026-10-07)
+
+Measured on the 120 newest Big News items, about half the rail was noise to
+a trader: law-firm "investor reminder" releases, housekeeping (a notes
+offering closing, tender-offer results, a reverse split, a SPAC's IPO
+pricing, a monthly volume report), mega-cap releases that cannot move the
+stock, and the same release shown two or three times. Four rules fix it;
+none needs an AI. The plan is `../tapehawk-bignews-plan.md`.
+
+1. **Law-firm solicitations are noise.** Two tiers in `classify`.
+   `LAW_FIRM_PATTERNS` are shapes only a pitch has ("investor reminder",
+   "lead plaintiff", "deal notice", "on behalf of investors", "investors
+   who lost", LLP beside investors) and the firm names seen on the wires:
+   one match makes `is_noise()` true and `noise_reason()` "law-firm
+   solicitation". A one-word firm name (Pomerantz, Glancy, Monteverde...)
+   is also somebody's surname, so it needs a second word from the trade in
+   the same headline. `LAW_FIRM_GENERIC` are shapes a company's own release
+   can share ("class action", "shareholder notice", "reminds shareholders",
+   "under investigation", "securities fraud claims"): one of those is noise
+   only with a `LAW_FIRM_SIGNALS` word beside it (contact, deadline,
+   losses, join, a law firm, LLP/LLC...) and none of `LAW_FIRM_EXCEPTIONS`
+   (settlement, dismissal, "without merit", a rights plan, a meeting, the
+   SEC, a subpoena, an internal investigation). Noise rows are stored but
+   hidden from the feed and never published, exactly like the 13F churn --
+   the harshest mark in the system, so "Acme Announces Settlement of
+   Securities Class Action", "Acme Adopts Shareholder Rights Plan", "Acme
+   Receives Subpoena From SEC" and "Acme Provides Shareholder Update" stay
+   LEGAL and reach Halthawk (all 128 solicitation rows in the 300 newest
+   live feed rows are still noise under the two tiers).
+2. **Routine housekeeping is never Big News.** `classify.ROUTINE_PATTERNS`
+   is a tuple of (regex, plain words); a match caps `importance()` at 2,
+   `big` False, appends "routine: <words>", and the dollar figure adds
+   nothing. `ROUTINE_EXCEPTIONS` keep the real events out of it: a tender
+   offer TO ACQUIRE shares (M&A), a special dividend (any wording: "special
+   cash dividend", "special one-time dividend"), a dividend cut or
+   suspension, a CEO exit, a contract "award" or dollar figure "award"
+   ("Wins $300 Million Award From U.S. Army"), a received grant, topline /
+   Phase results, a breakthrough designation, a definitive or merger
+   agreement, a vote approving a merger, guidance raised or cut, index
+   inclusion, "named a supplier". **A real event outranks the housekeeping
+   beside it:** when a `_CRITICAL_PATTERNS` match is on the headline ("Acme
+   Receives FDA Approval for Zedox; to Host Conference Call Today") the cap
+   is not applied and the dollar points count -- unless the critical match
+   is itself housekeeping (a stock split, a tender offer's results) or the
+   headline is a price-action note ("shares are trading higher after the
+   FDA approval"), which is routine whatever event it mentions. Routine
+   rows stay in the feed.
+3. **Size the catalyst against the company.** `importance(title, symbols,
+   categories, market_cap=None, exchange=None)`: the defaults give exactly
+   the old score. With a size: a dollar figure worth half the company or
+   more +3, a tenth +1, under 2% of a $10B+ company takes the dollar
+   points back; a $20B+ company -2, a $100B+ company -3 (the spec said -2
+   for every large company, but then Pfizer's FDA approval at 7 - 2 = 5
+   still made the rail, which is the case the rule exists to remove), a
+   company under $300M +1; the score never goes below 0; `big = score >= 5`.
+   An exchange outside NASDAQ / NYSE / AMEX / NYSE American / NYSE Arca /
+   Cboe (short names and FMP's long names: "New York Stock Exchange",
+   "NASDAQ Global Select") makes `big` False whatever the score ("not
+   US-listed (TSX)"; OTC/PNK: "over the counter: not tradable here"; the
+   exchange `NONE` -- see below -- "not found on a US exchange"); an
+   unknown exchange changes nothing. `size_words(cap)` -> "$420M company" /
+   "$3.2B company" / "$210B company" is on every row and the rail shows it.
+   **Where the size comes from:** `companies.py`, table `companies`
+   (symbol, name, market_cap, price, exchange, country, fetched_at,
+   error). `size_of(symbol)` reads sqlite only and NEVER fetches: a
+   missing row is queued, a row older than `FRESH_DAYS` (3) is returned
+   and re-queued, an error row past its retry window is re-queued. A
+   daemon worker (`start(log)`; no `FMP_API_KEY` -> never starts, and then
+   `app` skips the warm-up too, so the queue does not fill with nothing to
+   drain it) drains the queue at most `RATE_PER_MIN` (60) FMP CALLS a
+   minute (a ticker can take two: `/stable/quote`, then `/stable/profile`
+   when the quote has no exchange or nothing came back) through
+   `fetch_fn`; tests replace `fetch_fn`. Three kinds of answer are stored
+   as `error`: a 402 or an empty answer ("not on this FMP plan", "no data")
+   is not asked again for `ERROR_RETRY_HOURS` (24); quote AND profile both
+   empty is `NO_LISTING` ("no US listing") with exchange `NONE`, also kept
+   a day, and it COUNTS as an answer (`store.size_from(row)` passes the
+   exchange through, so Novartis on NOVN and Fairfax on FFH can never be
+   big -- the risk: a ticker FMP has not indexed yet, a fresh IPO, is held
+   off the rail until the daily retry finds it); a timeout, a 429 or a 5xx
+   is "fetch failed: <kind>" (`TRANSIENT`), asked again in
+   `TRANSIENT_RETRY_HOURS` (1), and the worker waits `RETRY_PAUSE_S` (60)
+   before the next ticker. No error text ever carries the key: a requests
+   exception is recorded by class name only (its message holds the whole
+   URL, key included) and any other message is scrubbed of `apikey=`.
+   When a size (or the no-listing answer) lands,
+   `store.rescore_symbol(symbol, 48, score_fn)` re-scores that ticker's
+   rows from the last 48 hours with it (tone and impact untouched), so a
+   row is right within a minute of its first sighting. `warm(store)` at
+   boot queues every ticker from the last `WARM_DAYS` (14). The FMP budget:
+   Starter allows 300 calls a minute; floats, gems, the grader and this
+   worker share the key, and 60 here leaves room for the rest.
+   `/api/status["companies"]` = cached, queued, fetched_today, errors,
+   last_error, rate_per_min, calls.
+4. **Each release once.** `wires.handle()`: when `note_arrival` matches a
+   release another SOURCE delivered inside the 15-minute window with the
+   same stock and half the words shared (`COPY_OVERLAP`), the row and the
+   SSE payload carry `dup_of` = the first row's id (`store.set_dup`; the
+   log says "(also on rtpr, 60s later)"). `copy_of` keeps its meaning: the
+   same source's own second delivery. `store.recent(min_importance=...)`
+   -- the rail's query -- adds `AND dup_of IS NULL`; the plain feed shows
+   every row. The page (`paintBig`) also skips a live push with `dup_of`
+   and a live push whose key (first ticker + the first eight words of the
+   headline, digits kept so "Phase 2" and "Phase 3" differ) is already on
+   the rail; the first paint trusts the server, and a headline under four
+   words is never keyed.
+
+**What Halthawk still receives: everything.** Every row still goes out on
+the bus and over `/api/feed`; its reader (`tapehawk_news._norm`) keeps the
+keys it knows and ignores `dup_of`, `market_cap`, `exchange`, `size_words`.
+It does its own first-copy dedupe and its own kind filter.
+
+**The wire thread never waits on FMP.** `Source.article()` asks
+`companies.size_of(first ticker)` (one sqlite read) and queues the other
+tickers; `test_classify` asserts `fetch_fn` is never called on the handle
+path.
+
+**After a deploy** `app._rescore_once` runs `store.rescore_recent(30, ...)`
+in a thread: the noise check and the scorer (with cached sizes) over the
+last 30 days in batches of 200 with a pause, and logs how many rows changed
+importance, how many turned noise, and how many rows it could not re-score
+(`skipped`, with the last error) -- a row the scorer or the database choked
+on is counted, never silently dropped.
+
+**To add a routine or law-firm pattern:** one line in `ROUTINE_PATTERNS`
+(regex, words), `LAW_FIRM_PATTERNS` (a shape only a pitch has) or
+`LAW_FIRM_GENERIC` (a shape a company can share: it needs a signal), and
+one line in `tests/test_classify.py` with a live headline that must be
+routine or noise -- plus, when the pattern could catch a real event, one
+headline that must NOT be. The test pins each sure shape and each firm
+name on its own, so a deleted pattern shows up.
+
+Columns added (additive): `headlines.dup_of INTEGER`, `market_cap REAL`,
+`exchange TEXT`; table `companies`. `_row` exposes `dup_of`, `market_cap`,
+`exchange`, `size_words`; `big` is `importance >= 5` AND no exchange
+verdict on the stored exchange (a TSX, OTC or NONE row scoring 7 is not
+big and `recent(min_importance=5)` -- the rail -- leaves it out; a row
+with no exchange stored passes as before). Found 2026-10-07 while fixing
+the review: the scorer's verdict never reached the stored row.
+
 ## Tests
 
 `sh tests/run.sh` — plain scripts, temp sqlite, fakes for every network

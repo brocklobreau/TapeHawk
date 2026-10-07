@@ -6,6 +6,10 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 os.environ["TAPEHAWK_DB"] = os.path.join(tempfile.mkdtemp(), "t.db")
 import store; store.init()
+os.environ.pop("FMP_API_KEY", None)                    # no key: the size worker never starts
+import companies
+def _no_net(sym): raise AssertionError(f"the wire path must never fetch a size ({sym})")
+companies.fetch_fn = _no_net                           # a regression that fetches on the handle path fails here, with no request sent
 import bus, wires, snipe
 
 GNW = """<?xml version="1.0" encoding="utf-8"?>
@@ -94,7 +98,11 @@ assert art["created_at"] == now.isoformat() and "importance" in art and "tone" i
 # 'release' read and one with only a summary an 'rss' read -- the two must never pool)
 assert art["wire_pub"] == "2026-10-02T18:06:00+00:00" and art["paragraph"] is None and art["summary"] == "Acme Therapeutics Receives FDA Approval", art
 assert art["author"] is None and art["rtpr_id"] is None and art["impact"] is None and art["copy_of"] is None
+# Big News rules (2026-10-07): the first delivery of a release is nobody's dup; the size keys ride along (unknown here)
+assert art["dup_of"] is None and art["market_cap"] is None and art["exchange"] is None and art["size_words"] is None, art
+gnw_acme_id = art["id"]
 row = store.recent(limit=5)[0]
+assert row["dup_of"] is None and row["market_cap"] is None and row["size_words"] is None
 assert row["source"] == "globenewswire" and row["headline"] == "Acme Therapeutics Announces FDA Approval of Zedox" and row["symbols"] == ["ACME"]
 # ... and so does the stored row (/api/feed's shape)
 assert row["wire_pub"] == art["wire_pub"] and row["paragraph"] is None and row["summary"] == art["summary"] and row["rtpr_id"] is None and row["impact"] is None and row["copy_of"] is None, row
@@ -231,6 +239,12 @@ assert art["headline"] == "Acme Therapeutics Receives FDA Approval for Zedox in 
 # v2 step 9: the SSE payload carries author / wire_pub / rtpr_id / paragraph; the plain frame has no impact block
 assert art["wire_pub"] == "2026-10-05T11:30:00Z" and art["rtpr_id"] == "acme_n123" and art["paragraph"].startswith("BOSTON--(BUSINESS WIRE)--Acme"), art
 assert art["impact"] is None and art["copy_of"] is None
+# Big News rules (2026-10-07): the same Acme release reached GlobeNewswire's feed moments earlier (same stock, five of
+# seven words shared), so this rtpr row is marked dup_of that row -- on the SSE payload and the stored row -- and the
+# rail (recent with min_importance) shows the release once while the plain feed keeps both
+assert art["dup_of"] == gnw_acme_id and store.get(art["id"])["dup_of"] == gnw_acme_id, art
+assert any("(also on globenewswire," in l for l in logs), [l for l in logs if "rtpr" in l]
+assert art["id"] not in [h["id"] for h in store.recent(min_importance=5)] and art["id"] in [h["id"] for h in store.recent()]
 acme_id = art["id"]
 # a two-ticker release: the second ticker's frame has the same link; no second fetch, no second row, no second SSE
 # message -- the ticker is merged into the stored row, so the one row keeps both tickers

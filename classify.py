@@ -76,7 +76,7 @@ CATALYST_PATTERNS = (
         r"\bselected\s+by\b", r"\bwins?\s+(?:contract|order|bid|tender)\b",
     )),
     ("legal", (
-        r"\blawsuit\b", r"\bsued\b", r"\bsues\b", r"\blitigation\b", r"\binvestigation\b",
+        r"\blawsuit\b", r"\bsued\b", r"\bsues\b", r"\blitigation\b", r"\bclass\s+action\b", r"\binvestigation\b",
         r"\bprobe\b", r"\bsec\s+(?:filing|charges|investigat)", r"\bsettlement\b",
         r"\bfined\b", r"\bantitrust\b", r"\brecall\b", r"\bsubpoena\b",
     )),
@@ -174,7 +174,89 @@ NOISE_PATTERNS = (
     r"\bif\s+you\s+(?:had\s+)?bought\b.{0,30}\b(?:years?|decade)\s+ago\b",
 )
 
+# --- law-firm solicitations (Big News rules, 2026-10-07) ---------------------
+# Securities law firms post to the same wires as the companies they chase:
+# "PRTH Investor Reminder: BFA Law Reminds ... Shareholders of the Ongoing
+# Investigation", "CDNL Stock Notice: ... Securities Fraud Lawsuit", "Deal
+# Notice: ... Take-Private Merger Under Investigation". Each names a ticker,
+# so each reached the feed, and three of the 120 newest Big News items on the
+# live site were these. They are noise: hidden from the feed like the 13F
+# churn. The shapes come first, then the firm names seen on the wires (each
+# word-bounded, so "Rosen" inside a company name does not fire).
+#
+# What this must NOT catch is a company's own legal news -- "Acme Announces
+# Settlement of Patent Litigation", "Acme Sued by Rival Over Trade Secrets",
+# "SEC Charges Acme" stay category LEGAL, scored as before. test_classify
+# pins both sides.
+#
+# Two tiers. LAW_FIRM_PATTERNS are shapes only a solicitation has (and the
+# firm names): one match is enough. LAW_FIRM_GENERIC are shapes a company's
+# own release can share -- "class action", "shareholder notice", "reminds
+# shareholders", "under investigation" -- so one of those is noise only when
+# the headline ALSO carries a solicitation signal (LAW_FIRM_SIGNALS: contact,
+# deadline, losses, lead plaintiff, a law firm...) and none of the company
+# words in LAW_FIRM_EXCEPTIONS (a settlement, a rights plan, a meeting, the
+# SEC). Reviewed 2026-10-07: with the generic shapes bare, "Acme Announces
+# Settlement of Securities Class Action", "Acme Adopts Shareholder Rights
+# Plan" and "Acme Receives Subpoena From SEC" were all hidden from the feed
+# and never published to Halthawk.
+LAW_FIRM_PATTERNS = (
+    r"\binvestors?\s+(?:reminder|alert|notice|deadline)\b",
+    r"\blead\s+plaintiff\b",
+    r"\bdeadline\s+(?:reminder|alert|approaching)\b",
+    r"\b(?:stock|deal|investor|merger)\s+notice\b",
+    r"\bon\s+behalf\s+of\s+(?:investors|shareholders|purchasers)\b",
+    r"\bdata\s+breach\s+alert\b",
+    r"\blosses?\s+in\s+excess\s+of\b",
+    r"\binvestors?\s+(?:who|that)\s+(?:lost|purchased|acquired|suffered)\b",
+    # "LLP" in a headline that also talks about investors/shareholders or an investigation
+    r"^(?=.*\bLLP\b).*\b(?:investors?|shareholders?|stockholders?|investigat\w*)\b",
+    # the firms themselves (two-word names are safe bare)
+    r"\brosen\s+law\b", r"\blevi\s*(?:&|and)\s*korsinsky\b",
+    r"\bschall\s+law\b", r"\bkahn\s+swick\b", r"\bbfa\s+law\b", r"\bjohnson\s+fistel\b",
+    r"\bhalper\s+sadeh\b", r"\brobbins\s+llp\b", r"\brobbins\s+geller\b", r"\bkessler\s+topaz\b",
+    r"\bportnoy\s+law\b", r"\bbragar\s+eagle\b", r"\bblock\s*(?:&|and)\s*leviton\b",
+    r"\bhagens\s+berman\b", r"\bbernstein\s+liebhard\b", r"\bkirby\s+mcinerney\b", r"\bwolf\s+haldenstein\b",
+    r"\bweiss\s+law\b", r"\bberger\s+montague\b",
+    r"\bscott\s*\+\s*scott\b", r"\bgainey\s+mckenna\b", r"\bhoward\s+g\.?\s+smith\b",
+    r"\bfrank\s+r\.?\s+cruz\b", r"\bryan\s*(?:&|and)\s*maniskas\b", r"\bmoore\s+law\b",
+    r"\bpurcell\s*(?:&|and)\s*lefkowitz\b", r"\bedelson\s+lechtzin\b", r"\bpawar\s+law\b",
+    r"\bholzer\s*(?:&|and)\s*holzer\b", r"\bclaimsfiler\b", r"\bshareholders\s+foundation\b",
+    # a one-word firm name is also somebody's surname ("Acme Monteverde Wins
+    # Contract"), so it needs a second word from the trade in the same headline
+    r"^(?=.*\b(?:investors?|shareholders?|stockholders?|class\s+action|deadline|law|llp|llc|p\.?c\.?|securities|investigat\w*)\b)"
+    r".*\b(?:pomerantz|bronstein|faruqi|glancy|ademi|monteverde|lifshitz|grabar|kaskela|kuznicki|labaton|jakubowitz|zamansky)\b",
+)
+LAW_FIRM_GENERIC = (
+    r"\bshareholders?\s+(?:alert|notice|reminder)\b",
+    r"\bclass\s+action\b",
+    r"\bsecurities\s+(?:fraud\s+)?(?:lawsuit|litigation|class\s+action|claims?)\b",
+    r"\b(?:encourages?|reminds?|urges?|notifies|alerts?)\b.{0,60}\b(?:investors|shareholders|stockholders)\b",
+    r"\b(?:investors|shareholders|stockholders)\s+(?:are\s+)?(?:encouraged|reminded|urged|advised)\b",
+    r"\bunder\s+investigation\b.{0,80}\b(?:shareholders?|investors?|merger|take.private|buyout)\b",
+    r"\b(?:shareholders?|investors?|merger|take.private|buyout)\b.{0,80}\bunder\s+investigation\b",
+    r"\binvestigat(?:es|ing|ion)\s+(?:of\s+|into\s+)?.{0,40}\b(?:on\s+behalf|fairness|potential\s+(?:breaches|claims)|"
+    r"securities\s+(?:claims?|fraud|violations?|laws?))\b",
+)
+LAW_FIRM_SIGNALS = (
+    r"\bcontact\b", r"\bdeadline\b", r"\blead\s+plaintiff\b", r"\brecover\b", r"\blost\s+money\b", r"\blosses\b",
+    r"\bjoin\b", r"\breminds?\b", r"\bencourages?\b", r"\burges?\b", r"\blaw\s+(?:firm|offices?)\b",
+    r"\bLLP\b", r"\bLLC\b", r"\bP\.C\.", r"\bfiled\s+(?:on\s+behalf|against)\b", r"\bsecurities\s+fraud\b",
+    r"\binvestigation\b", r"\bplummet", r"\bfell\b.{0,20}%",
+)
+LAW_FIRM_EXCEPTIONS = (
+    r"\b(?:settle|settlement|dismiss|resolv|denies|without\s+merit|responds?\s+to)",
+    r"\brights\s+(?:plan|offering|agreement)\b",
+    r"\b(?:annual|special|general)\s+meeting\b", r"\brecord\s+date\b", r"\bproxy\b", r"\bto\s+vote\b",
+    r"\b(?:by\s+the\s+)?sec\b", r"\bsubpoena\b", r"\binternal\s+investigation\b",
+    r"\b(?:audit|special)\s+committee\b", r"\bdoj\b", r"\bdepartment\s+of\s+justice\b",
+)
+
 _NOISE_RE = [re.compile(p, re.I) for p in NOISE_PATTERNS]
+_LAW_RE = [re.compile(p, re.I | re.S) for p in LAW_FIRM_PATTERNS]
+_LAW_GENERIC_RE = [re.compile(p, re.I | re.S) for p in LAW_FIRM_GENERIC]
+_LAW_SIGNAL_RE = [re.compile(p, re.I | re.S) for p in LAW_FIRM_SIGNALS]
+_LAW_EXC_RE = [re.compile(p, re.I | re.S) for p in LAW_FIRM_EXCEPTIONS]
 _CAT_RE = [(cat, [re.compile(p, re.I) for p in pats]) for cat, pats in CATALYST_PATTERNS]
 
 # Wire copy does not arrive in plain ASCII, and every pattern above is written
@@ -216,9 +298,24 @@ def normalize(text):
     return t
 
 
-def is_noise(title):
+def noise_reason(title):
+    """Why a headline is filler, in plain words, or None: "filtered as
+    routine" (13F churn, listicles) or "law-firm solicitation"."""
     t = normalize(title)
-    return any(r.search(t) for r in _NOISE_RE)
+    if any(r.search(t) for r in _NOISE_RE):
+        return "filtered as routine"
+    if any(r.search(t) for r in _LAW_RE):
+        return "law-firm solicitation"
+    # a shape a company's own release can share: noise only with a
+    # solicitation signal beside it and no company word
+    if (any(r.search(t) for r in _LAW_GENERIC_RE) and any(r.search(t) for r in _LAW_SIGNAL_RE)
+            and not any(r.search(t) for r in _LAW_EXC_RE)):
+        return "law-firm solicitation"
+    return None
+
+
+def is_noise(title):
+    return noise_reason(title) is not None
 
 
 def classify_headline(title):
@@ -333,6 +430,8 @@ _CRITICAL_PATTERNS = (
     r"\bgoing\s+private\b", r"\btakeover\s+bid\b",
 )
 _CRITICAL_RE = [re.compile(p, re.I) for p in _CRITICAL_PATTERNS]
+# the critical matches that are housekeeping themselves: they never lift the routine cap
+_HOUSEKEEPING_CRIT_RE = re.compile(r"stock\s+split|tender\s+offer", re.I)
 
 _MONEY_RE = re.compile(
     r"\$\s?([\d,]+(?:\.\d+)?)\s*(trillion|billion|million|bn|mn|[bmt])\b", re.I)
@@ -354,28 +453,247 @@ def biggest_dollar_amount(text):
     return best
 
 
-def importance(title, symbols=None, categories=None):
+# --- routine housekeeping (Big News rules, 2026-10-07) -----------------------
+#
+# Measured on the 120 newest Big News items on the live site, 16 were corporate
+# housekeeping that the arithmetic above mistakes for events: a $14.65 billion
+# notes offering CLOSING (the money was raised months ago), tender-offer
+# results, a reverse split (the "stock split" critical pattern fires), a SPAC
+# pricing its IPO, a monthly trading-volume report with a trillion-dollar
+# figure in it, an "economic impact" report. None of them moves the stock.
+# A match here caps the score at 2 and says why; dollar figures add nothing on
+# a routine release. These rows stay in the feed -- they are real releases --
+# they just never reach the rail. Each pattern carries its plain-words label.
+ROUTINE_PATTERNS = (
+    # debt
+    (r"\b(?:notes?|bonds?|debentures?)\s+offerings?\b", "a debt deal, not an event"),
+    (r"\bsenior\s+(?:secured\s+|unsecured\s+)?notes\b", "a debt deal, not an event"),
+    (r"^(?=.*\bconvertible\s+(?:senior\s+)?notes\b).*\b(?:pric|clos|upsiz|launch|propos|offer)", "a debt deal, not an event"),
+    (r"\bcredit\s+(?:facility|agreement)\b", "a debt deal, not an event"),
+    (r"\bterm\s+loan\b", "a debt deal, not an event"),
+    (r"\brevolving\b", "a debt deal, not an event"),
+    (r"\brefinanc", "a debt deal, not an event"),
+    (r"\bredemption\s+of\b.*\bnotes\b", "a debt deal, not an event"),
+    (r"\bexchange\s+offer\s+for\b.*\bnotes\b", "a debt deal, not an event"),
+    # tender-offer housekeeping (a tender offer TO ACQUIRE shares is M&A: see ROUTINE_EXCEPTIONS)
+    (r"\b(?:results?|expiration|extension|completion|final\s+results)\s+of\b.*\btender\s+offer\b", "tender-offer housekeeping"),
+    (r"\btender\s+offer\b.*\b(?:results|expir)", "tender-offer housekeeping"),
+    (r"\btender\s+offer\s+for\b.*\bnotes\b", "tender-offer housekeeping"),
+    # reverse split
+    (r"\breverse\s+(?:stock\s+)?split\b", "a reverse split"),
+    (r"\bshare\s+consolidation\b", "a reverse split"),
+    # meetings / proxy
+    (r"\b(?:results?\s+of|votes?\s+at)\b.*\b(?:annual|special)\s+(?:general\s+)?meeting\b", "meeting business"),
+    (r"\bannual\s+meeting\s+(?:results|of\s+(?:stock|share)holders)\b", "meeting business"),
+    (r"\bproxy\s+advis", "meeting business"),
+    (r"\biss\s+(?:and\s+glass\s+lewis\s+)?recommend", "meeting business"),
+    (r"\bglass\s+lewis\b", "meeting business"),
+    # dividends (a special dividend stays scored; a cut or suspension is critical and stays)
+    (r"\bdeclares?\b.*\b(?:quarterly|monthly|regular|cash)\s+dividend\b", "a regular dividend"),
+    (r"\bdividend\s+(?:declaration|of\s+\$)", "a regular dividend"),
+    (r"\bdistribution\s+(?:declaration|of\s+\$)", "a regular dividend"),
+    # calendar / investor relations
+    (r"\bto\s+(?:present|participate|host|report|announce|release|webcast|hold|attend|speak)\b.{0,60}"
+     r"\b(?:conference|(?:quarterly|financial|fiscal|year.end|full.year|q[1-4])\s+results|earnings|"
+     r"(?:conference|earnings)\s+call|webcast|investor\s+day|fireside|summit|forum|symposium)\b", "a date on the calendar"),
+    (r"\b(?:first|second|third|fourth)\s+quarter\b.{0,20}\b(?:results|earnings)\s+(?:on|date|call|conference\s+call)\b", "a date on the calendar"),
+    (r"\bconference\s+call\s+(?:on|to\s+discuss)\b", "a date on the calendar"),
+    (r"\bring(?:s|ing)?\s+the\b.{0,30}\b(?:opening|closing)\s+bell\b", "a date on the calendar"),
+    (r"\binvestor\s+(?:presentation|day)\s+(?:on|scheduled)\b", "a date on the calendar"),
+    # awards / public relations
+    (r"\bnamed\s+(?:to|one\s+of|a|among)\b", "public relations"),
+    (r"\brecogni[sz]ed\s+(?:as|by|for|in|with)\b", "public relations"),
+    (r"\b(?:wins?|receives?|awarded|earns?|honou?red\s+with)\b.{0,30}\baward\b", "public relations"),
+    (r"\b(?:best|top)\s+(?:places?|companies|workplaces?)\s+to\s+work\b", "public relations"),
+    (r"\b(?:sustainability|esg|csr|impact|corporate\s+responsibility|dei)\s+report\b", "public relations"),
+    (r"\beconomic\s+impact\b", "public relations"),
+    (r"\bcelebrates?\b", "public relations"),
+    (r"\banniversary\b", "public relations"),
+    (r"\branked\s+(?:#|no\.|number)\s?\d", "public relations"),
+    (r"\bgreat\s+place\s+to\s+work\b", "public relations"),
+    (r"\bfortune\s+500\b", "public relations"),
+    (r"\b(?:donates?|donation|pledges?|scholarship)s?\s+to\b", "public relations"),
+    # a received grant is funding; only a grant the company GIVES is public relations
+    (r"\b(?:awards?|makes?|gives?|provides?)\s+(?:a\s+)?(?:\$[\d.,]+\s*(?:million|billion|thousand|[mbk])?\s+)?grant\s+to\b", "public relations"),
+    (r"\b(?:fraud|financial|consumer)\s+(?:education|literacy|awareness)\b", "public relations"),
+    (r"\b(?:new\s+)?(?:report|survey|study)\s+(?:finds|shows|reveals)\b", "public relations"),
+    # operating metrics
+    (r"\b(?:monthly|weekly)\s+(?:metrics|operating|volume|statistics|traffic|sales\s+report)\b", "a routine metrics report"),
+    (r"\baverage\s+daily\s+volume\b", "a routine metrics report"),
+    (r"\bassets\s+under\s+management\b", "a routine metrics report"),
+    (r"\b(?:total|monthly|quarterly)\s+trading\s+volume\b", "a routine metrics report"),
+    (r"\breports?\b.{0,40}\b(?:volume|aum|traffic|passengers|net\s+sales)\s+for\s+"
+     r"(?:january|february|march|april|may|june|july|august|september|october|november|december)\b", "a routine metrics report"),
+    (r"\bmonth-end\b", "a routine metrics report"),
+    # listings
+    (r"\b(?:prices?|pricing\s+of|announces?\s+pricing)\b.{0,40}\b(?:initial\s+public\s+offering|ipo)\b", "listing paperwork"),
+    (r"\bclosing\s+of\b.*\b(?:initial\s+public\s+offering|ipo)\b", "listing paperwork"),
+    (r"\bunits?\s+(?:to\s+)?begin\s+separate\s+trading\b", "listing paperwork"),
+    (r"\b(?:receives?|regains?|announces?)\b.*\bnasdaq\s+(?:deficiency|notice|notification|compliance)\b", "listing paperwork"),
+    (r"\b(?:nyse|nasdaq)\s+(?:minimum\s+bid|continued\s+listing|listing)\s+(?:notice|requirement|standard)\b", "listing paperwork"),
+    (r"\bfiles?\s+(?:its\s+)?(?:annual|quarterly)\s+report\b", "listing paperwork"),
+    (r"\bform\s+(?:10-k|10-q|20-f|40-f)\b", "listing paperwork"),
+    # staffing (leadership still gets its 1 point; a CEO resignation or ouster is critical and stays)
+    (r"\bappoints?\b.{0,40}\b(?:to\s+(?:its\s+|the\s+)?board|as\s+(?:chief|vice|senior|general\s+counsel|head\s+of)|director)\b", "a hire"),
+    (r"\b(?:joins?|named)\b.{0,30}\bboard\s+of\s+directors\b", "a hire"),
+    # ambient: Benzinga's after-the-fact lines (the socket is off; the archive has them)
+    (r"\b(?:stock|shares)\s+(?:is|are)\s+trading\s+(?:higher|lower)\b", "a price-action note, not a release"),
+    (r"^shares\s+of\b.{0,80}\bare\s+(?:trading\s+)?(?:higher|lower)\b", "a price-action note, not a release"),
+)
+
+# A headline that matches one of these is never routine, whatever else it
+# matches: these are the real events that share words with the housekeeping.
+ROUTINE_EXCEPTIONS = (
+    r"\b(?:commences?|launches?|announces?)\b.*\btender\s+offer\s+to\s+(?:acquire|purchase)\b.*\b(?:shares|stock|common)\b",
+    r"\bto\s+(?:be\s+)?acquire[sd]?\b",                     # an acquisition in a tender-offer or meeting headline
+    r"\bspecial\b.{0,25}\bdividend\b",                       # "special cash dividend", "special one-time dividend"
+    r"\b(?:suspend|cut|eliminat|reduc|slash)\w*\b.{0,30}\bdividend\b",
+    r"\bdividend\s+(?:cut|suspen)",
+    r"\bceo\s+(?:resigns|steps?\s+down|ousted|fired)\b",
+    r"\bcontract\s+award",
+    r"\baward(?:ed|s)?\b.{0,40}\b(?:contract|order|task\s+order|idiq)\b",
+    # contract money phrased as an award: "Wins $300 Million Award From U.S. Army", "Task Order Award"
+    r"\$\s?[\d.,]+\s*(?:trillion|billion|million|bn|mn|[bmt])\b.{0,40}\baward",
+    r"\b(?:task\s+order|contract|order|idiq|grant)\b.{0,20}\baward",
+    # the real events that share words with the housekeeping (reviewed 2026-10-07)
+    r"\btopline\b", r"\bphase\s*[123]\b.{0,40}\b(?:results?|data|meets?|fails?)\b", r"\bprimary\s+endpoint\b",
+    r"\bbreakthrough\s+(?:therapy|device)\b",
+    r"\bdefinitive\s+(?:merger\s+)?agreement\b", r"\bmerger\s+agreement\b",
+    r"\b(?:approve|approval\s+of)\b.{0,20}\b(?:merger|acquisition|sale|business\s+combination)\b",
+    r"\b(?:withdraws?|cuts?|raises?|lowers?)\b.{0,20}\bguidance\b",
+    # index inclusion moves a stock; a supplier win is a commercial win
+    r"\b(?:s&p|russell|nasdaq.100|dow\s+jones)\b.{0,25}\b(?:index|500|600|1000|2000|3000)\b",
+    r"\bnamed\s+(?:a|as)\s+(?:supplier|vendor|partner|prime\s+contractor)\b",
+)
+AMBIENT_WORDS = "a price-action note, not a release"
+_ROUTINE_RE = [(re.compile(p, re.I | re.S), words) for p, words in ROUTINE_PATTERNS]
+_ROUTINE_EXC_RE = [re.compile(p, re.I) for p in ROUTINE_EXCEPTIONS]
+
+
+def routine_reason(title):
+    """The plain-words label of the housekeeping shape this headline has, or
+    None when it is not housekeeping. A price-action note ("shares are
+    trading higher after the FDA approval") is routine whatever event it
+    mentions: the event is not this headline's news."""
+    t = normalize(title)
+    for r, words in _ROUTINE_RE:
+        if words == AMBIENT_WORDS and r.search(t):
+            return words
+    if any(r.search(t) for r in _ROUTINE_EXC_RE):
+        return None
+    for r, words in _ROUTINE_RE:
+        if r.search(t):
+            return words
+    return None
+
+
+def is_routine(title):
+    return routine_reason(title) is not None
+
+
+# --- company size (Big News rules, 2026-10-07) --------------------------------
+#
+# The same dollar figure is a rounding error for a $200B company and the whole
+# company for a $50M one, and the scorer could not tell them apart: about 20 of
+# the 120 newest Big News items were mega-cap releases that cannot move the
+# stock. With the market cap known (companies.py, from FMP, cached) the catalyst
+# is sized against the company. A non-US or over-the-counter listing is never
+# Big News: nothing here can be traded.
+
+US_EXCHANGES = {"NASDAQ", "NYSE", "AMEX", "NYSE AMERICAN", "NYSE ARCA", "ARCA", "CBOE", "BATS", "CBOE BZX",
+                "NYSEAMERICAN", "NYSE MKT", "NEW YORK STOCK EXCHANGE", "NASDAQ GLOBAL SELECT", "NASDAQ GLOBAL MARKET",
+                "NASDAQ CAPITAL MARKET", "NASDAQ STOCK MARKET", "NYSE ARCA EQUITIES"}
+OTC_EXCHANGES = {"OTC", "PNK", "OTCQB", "OTCQX", "OTC MARKETS", "OTCBB", "GREY", "EXPERT MARKET"}
+NO_LISTING = "NONE"         # companies.py stores this as the exchange when FMP has no US listing for the ticker
+LARGE_CAP = 20e9            # one release rarely moves a company this size
+MEGA_CAP = 100e9            # ... and almost never one this size
+SMALL_CAP = 300e6           # one release can reprice a company this size
+SIZE_SMALL_RATIO = 0.02     # a figure under 2% of a $10B+ company is a line item
+
+
+def size_words(market_cap):
+    """"$420M company" / "$3.2B company" / "$210B company"; None for None."""
+    try:
+        v = float(market_cap)
+    except (TypeError, ValueError):
+        return None
+    if v <= 0 or v != v:
+        return None
+    if v >= 1e12:
+        n = v / 1e12
+        return f"${n:.0f}T company" if n >= 10 else f"${n:.1f}T company"
+    if v >= 1e9:
+        n = v / 1e9
+        return f"${n:.0f}B company" if n >= 10 else f"${n:.1f}B company"
+    return f"${v/1e6:.0f}M company"
+
+
+def _money_words(dollars):
+    if dollars >= 1e9:
+        n = dollars / 1e9
+        return f"${n:,.0f}B" if n >= 10 else f"${n:,.1f}B"
+    return f"${dollars/1e6:,.0f}M"
+
+
+def exchange_verdict(exchange):
+    """None when the exchange is unknown or US-listed; else the plain-words
+    reason the release can never be Big News here."""
+    ex = str(exchange or "").strip().upper()
+    if not ex:
+        return None
+    if ex in US_EXCHANGES:
+        return None
+    if ex == NO_LISTING:
+        return "not found on a US exchange"
+    if ex in OTC_EXCHANGES or ex.startswith("OTC"):
+        return "over the counter: not tradable here"
+    return f"not US-listed ({exchange})"
+
+
+def importance(title, symbols=None, categories=None, market_cap=None, exchange=None):
     """Returns {"score", "big", "reasons", "dollars"}.
 
     `big` is what the UI promotes. The threshold is set so a headline needs
     real weight -- a large sum, or a major category plus a magnitude word --
     rather than any single weak hint. Tuned deliberately toward missing
     borderline stories rather than flooding the section: a "big news" rail
-    that fires ten times an hour is one nobody reads."""
+    that fires ten times an hour is one nobody reads.
+
+    Without `market_cap` and `exchange` the answer is exactly what it was
+    before the size rules (2026-10-07). With them: the dollar figure is sized
+    against the company, a large company loses points and a small one gains,
+    and a non-US or over-the-counter listing is never big."""
     t = normalize(title)
     cats = categories if categories is not None else classify_headline(t)
     score, reasons = 0, []
+    routine = routine_reason(t)
+
+    # A real event outranks the housekeeping beside it: "Acme Receives FDA
+    # Approval for Zedox; to Host Conference Call Today" is an approval, not
+    # a date on the calendar. The cap stays when the critical match is itself
+    # housekeeping (a stock split, a tender offer's results) or the headline
+    # is a price-action note about an event that already happened.
+    critical = None
+    for r in _CRITICAL_RE:
+        m = r.search(t)
+        if m:
+            critical = m.group(0).strip().lower()
+            break
+    if routine and critical and routine != AMBIENT_WORDS and not _HOUSEKEEPING_CRIT_RE.search(critical):
+        routine = None
 
     dollars = biggest_dollar_amount(t)
-    if dollars:
+    dollar_pts = 0
+    if dollars and not routine:               # dollar figures add nothing on a routine release
         if dollars >= 50e9:
-            score += 6; reasons.append(f"${dollars/1e9:,.0f}B — enormous")
+            dollar_pts = 6; reasons.append(f"${dollars/1e9:,.0f}B — enormous")
         elif dollars >= 10e9:
-            score += 5; reasons.append(f"${dollars/1e9:,.1f}B")
+            dollar_pts = 5; reasons.append(f"${dollars/1e9:,.1f}B")
         elif dollars >= 1e9:
-            score += 3; reasons.append(f"${dollars/1e9:,.1f}B")
+            dollar_pts = 3; reasons.append(f"${dollars/1e9:,.1f}B")
         elif dollars >= 250e6:
-            score += 1; reasons.append(f"${dollars/1e6:,.0f}M")
+            dollar_pts = 1; reasons.append(f"${dollars/1e6:,.0f}M")
+        score += dollar_pts
 
     for c in cats:
         w = _CAT_WEIGHT.get(c, 0)
@@ -389,12 +707,9 @@ def importance(title, symbols=None, categories=None):
             reasons.append(f"“{word}”")
             break          # one magnitude word is the signal; five is a style
 
-    for r in _CRITICAL_RE:
-        m = r.search(t)
-        if m:
-            score += 4
-            reasons.append(f"critical event ({m.group(0).strip().lower()})")
-            break
+    if critical:
+        score += 4
+        reasons.append(f"critical event ({critical})")
 
     n = len(symbols or [])
     if n >= 4:
@@ -402,13 +717,51 @@ def importance(title, symbols=None, categories=None):
         reasons.append(f"{n} tickers affected")
 
     # Filler can never be big news, whatever else it scores. An options-income
-    # listicle mentioning "$500 a month" must not reach the top rail.
-    if is_noise(t):
-        return {"score": 0, "big": False, "reasons": ["filtered as routine"],
-                "dollars": dollars}
+    # listicle mentioning "$500 a month" must not reach the top rail, and
+    # neither does a law firm's "investor reminder".
+    why_noise = noise_reason(t)
+    if why_noise:
+        return {"score": 0, "big": False, "reasons": [why_noise], "dollars": dollars}
 
-    return {"score": score, "big": score >= 5, "reasons": reasons,
-            "dollars": dollars}
+    # Housekeeping is never big: capped at 2 whatever it scored.
+    if routine:
+        score = min(score, 2)
+        reasons.append(f"routine: {routine}")
+        return {"score": score, "big": False, "reasons": reasons, "dollars": dollars}
+
+    # Size the catalyst against the company, when the size is known.
+    cap = None
+    try:
+        cap = float(market_cap) if market_cap is not None else None
+        if cap is not None and (cap <= 0 or cap != cap):
+            cap = None
+    except (TypeError, ValueError):
+        cap = None
+    if cap is not None:
+        if dollars:
+            ratio = dollars / cap
+            if ratio >= 0.5:
+                score += 3; reasons.append("worth half the company or more")
+            elif ratio >= 0.1:
+                score += 1; reasons.append("a tenth of the company")
+            elif ratio < SIZE_SMALL_RATIO and cap >= 10e9 and dollar_pts:
+                score -= dollar_pts
+                reasons.append(f"{_money_words(dollars)} is small next to a {size_words(cap)}")
+        if cap >= MEGA_CAP:
+            score -= 3; reasons.append(f"a very large company ({size_words(cap)}): one release almost never moves it")
+        elif cap >= LARGE_CAP:
+            score -= 2; reasons.append(f"a large company ({size_words(cap)}): one release rarely moves it")
+        elif cap <= SMALL_CAP:
+            score += 1; reasons.append(f"a small company ({size_words(cap)}): one release can reprice it")
+        score = max(0, score)
+
+    big = score >= 5
+    verdict = exchange_verdict(exchange)
+    if verdict:
+        big = False
+        reasons.append(verdict)
+
+    return {"score": score, "big": big, "reasons": reasons, "dollars": dollars}
 
 
 # --- good news or bad news? -----------------------------------------------

@@ -59,6 +59,7 @@ import requests
 
 import bus
 import classify
+import companies
 import store
 
 USER_AGENT = "Tapehawk/1.0 (+https://tapehawk.onrender.com)"
@@ -367,10 +368,28 @@ class Source(threading.Thread):
             self.arrivals.append(dict(self._print(art), ts=now.timestamp(), id=first_id if first_id is not None else art["id"]))
             # a copy is not an arrival: the scoreboard would otherwise count the same release twice for this source
             m = None if first_id is not None else note_arrival(self.src, art["symbols"], art["headline"], now.timestamp(), art.get("id"))
+            # Big News rules (2026-10-07): the same release another SOURCE delivered first (same stock, half the
+            # words shared, inside the match window) is marked dup_of on the row and the SSE payload, and the rail
+            # shows it once. copy_of keeps its meaning: this source's own second delivery.
+            dup = None
+            if m and m.get("first_id") and (m.get("overlap") or 0) >= COPY_OVERLAP and m["first_id"] != art["id"]:
+                dup = m["first_id"]
+                art["dup_of"] = dup
+                try:
+                    store.set_dup(art["id"], dup)
+                except Exception as e:
+                    self.log(f"wire {self.src}: dup mark failed -- {e}")
+            if first_id is not None:
+                how = f" (copy of #{first_id})"
+            elif dup is not None:
+                how = f" (also on {m['first']}, {m['lag_s']:.0f}s later)"
+            elif m:
+                how = f" ({m['lag_s']:.0f}s after {m['first']})"
+            else:
+                how = " (first)"
             self.log(f"wire [{self.src}] [{','.join(art['symbols'][:3])}]"
                      + (f" ** BIG {art['importance']} {str(art['tone']).upper()} **" if art["big"] else "")
-                     + (f" (copy of #{first_id})" if first_id is not None else (f" ({m['lag_s']:.0f}s after {m['first']})" if m else " (first)"))
-                     + f" {art['headline'][:96]}")
+                     + how + f" {art['headline'][:96]}")
             if not art["is_noise"]:
                 if self.publish:
                     self.publish(art)
@@ -385,7 +404,13 @@ class Source(threading.Thread):
         headline = classify.normalize(it["title"]).strip()
         cats = classify.classify_headline(headline)
         noise = classify.is_noise(headline)
-        imp = classify.importance(headline, it["tickers"], cats)
+        # Big News rules (2026-10-07): the company's size, from the cache
+        # only (companies.size_of never fetches; a ticker it does not know
+        # is queued for the worker, and the row is re-scored when it lands).
+        comp = companies.size_of(it["tickers"][0]) if it["tickers"] else None
+        market_cap, exchange = store.size_from(comp)       # "no US listing" counts as an answer: exchange NONE
+        imp = classify.importance(headline, it["tickers"], cats, market_cap=market_cap, exchange=exchange)
+        companies.note(it["tickers"][1:])
         tn = classify.tone(headline)
         ip = classify.impact(headline, it["tickers"])
         # The arrival is the clock. A wire's pubDate is to the minute (or to a
@@ -415,6 +440,9 @@ class Source(threading.Thread):
             # apart by whether paragraph is there); copy_of is set by handle().
             "wire_pub": it["pub"], "paragraph": None,
             "rtpr_id": it.get("rtpr_id"), "impact": it.get("impact") or None, "copy_of": None,
+            # Big News rules (2026-10-07): dup_of is set by handle(); the size the row was scored with
+            "dup_of": None, "market_cap": market_cap, "exchange": exchange,
+            "size_words": classify.size_words(market_cap),
         }
 
 

@@ -134,6 +134,8 @@
   .why b { color:var(--accent); font-weight:600; }
   .score { font-family:var(--mono); font-size:10.5px; color:var(--accent);
            border:1px solid rgba(46,232,106,.42); border-radius:4px; padding:1px 5px; }
+  .size { font-family:var(--mono); font-size:10.5px; color:var(--muted);
+          border:1px solid var(--line); border-radius:4px; padding:1px 5px; }
   .tone { font-size:10.5px; font-weight:700; letter-spacing:.04em; padding:2px 7px;
           border-radius:4px; text-transform:uppercase; }
   .tone.positive { background:rgba(93,217,138,.16); color:var(--good); }
@@ -365,20 +367,33 @@
     var toneWhy = (h.tone_reasons||[]).length
       ? '<div class="impact"><b>Read as '+esc(h.tone)+':</b> '+
         esc(h.tone_reasons.join(' · '))+'</div>' : '';
+    // the company's size, when the cache knows it: the same figure means very different things
+    // for a $420M company and a $210B one, and the score already counts that
+    var size = h.size_words ? '<span class="size" title="market value, so the catalyst can be sized against the company">'+esc(h.size_words)+'</span>' : '';
     var d=document.createElement('div');
     d.className='big-item';
     d.setAttribute('data-id', h.id);
     d.innerHTML='<div class="meta"><span class="time">'+esc(ago(h.created_at))+'</span>'+
-                '<span class="score">'+(h.importance||0)+'</span>'+tn+syms+'</div>'+
+                '<span class="score">'+(h.importance||0)+'</span>'+tn+syms+size+'</div>'+
                 '<div class="big-head">'+title+'</div>'+why+toneWhy+imp+
                 '<span class="expand">Read the story ▾</span>';
     return d;
   }
 
-  var bigSeen={};
+  // One release, once. Two sources deliver the same release (rtpr and the GlobeNewswire feed), so on a LIVE
+  // push the rail keys the item on its first ticker plus the first eight words of the headline (digits kept:
+  // "Phase 2" and "Phase 3", "Q3 2026" and "Q4 2026" are different releases) and skips one it already shows --
+  // belt and braces for a dup that beat the server's match window. The server already leaves dup_of rows out of
+  // the first paint, and a headline of under four words (a non-Latin one) is never keyed: too little to go on.
+  function bigKey(h){
+    var words=(h.headline||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').split(' ').filter(function(w){return w;});
+    if(words.length<4) return null;
+    return ((h.symbols||[])[0]||'')+'|'+words.slice(0,8).join(' ');
+  }
+  var bigSeen={}, bigKeys={};
   function paintBig(list, prepend){
     var box=document.getElementById('bignews');
-    if(!prepend) { box.innerHTML=''; bigSeen={}; }
+    if(!prepend) { box.innerHTML=''; bigSeen={}; bigKeys={}; }
     var ph = box.querySelector('.empty');
     if (ph && list.length) ph.remove();
     // Preserve reading position: prepending shifts everything down, so if the
@@ -387,7 +402,11 @@
     var keep = prepend && box.scrollTop > 4;
     var before = box.scrollHeight;
     list.forEach(function(h){
-      if(bigSeen[h.id]) return; bigSeen[h.id]=1;
+      if(bigSeen[h.id]) return;
+      if(prepend && h.dup_of) return;        // the same release from a second source: the rail already has it
+      var k=bigKey(h);
+      if(prepend && k && bigKeys[k]) return;
+      bigSeen[h.id]=1; if(k) bigKeys[k]=1;
       var el=bigRow(h);
       if(prepend) box.insertBefore(el, box.firstChild); else box.appendChild(el);
     });

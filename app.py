@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 from flask import Flask, Response, redirect, request, send_from_directory
 
 import bus
+import classify
+import companies
 import earnings
 import filings
 import floats
@@ -344,6 +346,7 @@ def api_status():
             "filings": filings.status(), "halts": halts.status(),
             "floats": floats.status(), "offerings": offerings.status(),
             "gems": gems.status(), "snipe": snipe.status(), "wires": wires.status(),
+            "companies": companies.status(),
             "now": datetime.now(timezone.utc).isoformat()}
 
 
@@ -388,6 +391,24 @@ def _start_grader():
         log("outcomes: FMP_API_KEY not set -- outcome grading disabled")
         return
     threading.Thread(target=_grader_loop, daemon=True, name="grader").start()
+
+
+# Big News rules (2026-10-07): after a deploy the new noise and routine rules
+# (and whatever sizes are cached) are applied to the last 30 days, in batches
+# with a pause, so the rail and the archive agree with the new rules without
+# holding the database while the wires insert rows.
+RESCORE_DAYS = 30
+
+
+def _rescore_once():
+    time.sleep(20)                       # let the wires prime first
+    try:
+        r = store.rescore_recent(RESCORE_DAYS, companies.score_with_size, log=log, noise_fn=classify.is_noise)
+        skipped = f"; {r['skipped']} row(s) could not be re-scored (last: {r['last_error']})" if r.get("skipped") else ""
+        log(f"big news rules: {r['changed']} row(s) changed importance and {r['noise']} turned noise "
+            f"over the last {RESCORE_DAYS} days ({r['rows']} rows read{skipped})")
+    except Exception as e:
+        log(f"big news re-score failed (non-fatal): {e}")
 
 
 def start_once():
@@ -460,6 +481,17 @@ def start_once():
             wires.start(log=log, publish=bus.publish)
         except Exception as e:
             log(f"wires failed to start (non-fatal): {e}")
+        # Big News rules (2026-10-07): the company-size worker (FMP, cached,
+        # never on the wire thread), the warm-up for the last two weeks of
+        # tickers, and one pass over the archive with the new rules.
+        try:
+            if companies.start(log=log):
+                companies.warm(store, log=log)
+            else:
+                log("companies: no key, so the warm-up is skipped (nothing would drain the queue)")
+        except Exception as e:
+            log(f"companies worker failed to start (non-fatal): {e}")
+        threading.Thread(target=_rescore_once, daemon=True, name="rescore").start()
         log(f"tapehawk: started (pid {os.getpid()})")
 
 
