@@ -650,6 +650,96 @@ def exchange_verdict(exchange):
     return f"not US-listed ({exchange})"
 
 
+# --- Size guards (2026-10-07, evening): is FMP's company the release's company? ---
+#
+# The size cache looks a ticker up by its bare symbol, and the wires' tickers
+# collide with dead or re-used US symbols: Novartis's release (SIX: NOVN) was
+# sized as "Novan, Inc.", a delisted biotech FMP still answers for, and
+# Parabolic's (PARA) as "Banzai International". Two text checks catch that
+# before a size is trusted; store.size_from applies them.
+
+# Exchange tags as the wires print them: "(SIX: NOVN)", "(TSX: FFH)",
+# "(Euronext Paris: AIR)". The label is what the row stores as its exchange;
+# exchange_verdict then says "not US-listed (SIX)". The US tags are here so
+# a ticker named under both kinds ("(TSX: FFH) and (NYSE: FRFHF)") is told apart.
+EXCHANGE_TAGS = (
+    "NASDAQ", "NYSE American", "NYSE MKT", "NYSE Arca", "NYSE", "AMEX", "NYSEAMERICAN", "Cboe BZX", "Cboe", "BATS",
+    "SIX", "SWX", "TSXV", "TSX", "LSE", "ASX", "Euronext Paris", "Euronext Amsterdam", "Euronext Brussels",
+    "Euronext Lisbon", "Euronext Milan", "Euronext Oslo", "Euronext", "XETRA", "HKEX", "OTCQB", "OTCQX", "OTC Pink",
+    "OTC", "Pink", "CSE", "NSE", "BSE", "JSE", "SGX", "KRX", "TASE", "Nasdaq Stockholm", "Nasdaq Copenhagen",
+    "Nasdaq Helsinki", "Nasdaq First North", "Oslo Børs", "Oslo Bors", "Borsa Italiana", "BME", "FRA", "ETR",
+)
+_TAG_LABEL = {t.lower(): t for t in EXCHANGE_TAGS}
+_TAG_LABEL["oslo bors"] = "Oslo Børs"
+_TAG_LABEL["pink"] = "OTC Pink"
+_TAG_LABEL["nasdaq"] = "NASDAQ"
+# longest names first so "Nasdaq Stockholm" is not read as "Nasdaq"; the name is matched whatever its case,
+# the ticker must be upper case (digits for Hong Kong's "0700", a dot or dash for "BP." and "BRK-B")
+_EXCHANGE_TAG_RE = re.compile(
+    r"\b(?i:(" + "|".join(re.escape(t) for t in sorted(EXCHANGE_TAGS, key=len, reverse=True)).replace(r"\ ", r"\s+")
+    + r"))\s*:\s*([A-Z0-9]{1,6}(?:[.\-][A-Z0-9]{1,3})?)\b")
+
+
+def exchange_tags(text):
+    """Every "EXCHANGE: TICKER" tag in the text -> {ticker: [exchange label, ...]},
+    in order of appearance, each label once per ticker. {} when there is none."""
+    out = {}
+    for name, sym in _EXCHANGE_TAG_RE.findall(text or ""):
+        label = _TAG_LABEL.get(re.sub(r"\s+", " ", name).lower().strip(), name)
+        sym = sym.upper().rstrip(".")
+        if not sym:
+            continue
+        labels = out.setdefault(sym, [])
+        if label not in labels:
+            labels.append(label)
+    return out
+
+
+def non_us_tag(text, symbol):
+    """The non-US exchange label this ticker is tagged with in the text, when
+    it is tagged under no US one; else None. "(SIX: NOVN)" -> "SIX" for NOVN;
+    "(TSX: FFH) and (NYSE: FRFHF)" -> "TSX" for FFH, None for FRFHF."""
+    sym = str(symbol or "").upper().strip()
+    if not sym:
+        return None
+    labels = exchange_tags(text).get(sym) or []
+    if any(l.upper() in US_EXCHANGES for l in labels):
+        return None
+    for l in labels:
+        if l.upper() not in US_EXCHANGES:
+            return l
+    return None
+
+
+# Words a company's registered name carries that the release's own words need
+# not: the match is made on the first word left after these are dropped.
+NAME_SUFFIXES = {"inc", "corp", "corporation", "co", "company", "holdings", "holding", "group", "ltd", "limited",
+                 "plc", "sa", "ag", "nv", "se", "llc", "lp", "class", "a", "b", "the", "trust", "fund",
+                 "international", "technologies", "therapeutics", "pharmaceuticals"}
+_NAME_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def name_key(fmp_name):
+    """The word of a company's name the release must carry: the first word
+    left after the suffix words and punctuation are dropped ("The Boeing
+    Company" -> "boeing", "Banzai International, Inc. Class A" -> "banzai",
+    "Hims & Hers Health, Inc." -> "hims"). None when nothing is left."""
+    words = [w for w in _NAME_WORD_RE.findall(str(fmp_name or "").lower()) if w not in NAME_SUFFIXES]
+    return words[0] if words else None
+
+
+def name_matches(fmp_name, text):
+    """Is FMP's company named in the release? True when name_key(fmp_name)
+    appears as a whole word in the lower-cased text. "Novan" is not in
+    Novartis's release and "Banzai" is not in Parabolic's; "Top" is in "Top
+    Ships Inc. Announces...". A name with no key (or no text) never matches:
+    the cautious outcome is no size adjustment."""
+    key = name_key(fmp_name)
+    if not key or not text:
+        return False
+    return re.search(r"(?<![a-z0-9])" + re.escape(key) + r"(?![a-z0-9])", str(text).lower()) is not None
+
+
 def importance(title, symbols=None, categories=None, market_cap=None, exchange=None):
     """Returns {"score", "big", "reasons", "dollars"}.
 

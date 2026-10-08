@@ -464,6 +464,26 @@ def _start_grader():
 RESCORE_DAYS = 30
 
 
+def _size_guards_once():
+    """Size guards (2026-10-07, evening): re-check every size on file from the
+    last two weeks with the guards (a Novartis release sized as Novan loses
+    the size within a minute of the deploy, without waiting for the worker)
+    and mark the duplicates already on file, once per boot."""
+    time.sleep(5)
+    try:
+        r = store.resize_recent(companies.WARM_DAYS, companies.score_with_size, log=log)
+        skipped = f"; {r['skipped']} row(s) could not be re-checked (last: {r['last_error']})" if r.get("skipped") else ""
+        log(f"size guards: {r['resized']} row(s) lost or changed their size and {r['changed']} changed importance "
+            f"over the last {companies.WARM_DAYS} days ({r['rows']} sized rows read{skipped})")
+    except Exception as e:
+        log(f"size guards re-check failed (non-fatal): {e}")
+    try:
+        n = store.backfill_dups(companies.WARM_DAYS, log=log)
+        log(f"each release once: {n} older row(s) marked as another source's copy (dup_of)")
+    except Exception as e:
+        log(f"dup backfill failed (non-fatal): {e}")
+
+
 def _rescore_once():
     time.sleep(20)                       # let the wires prime first
     try:
@@ -563,6 +583,7 @@ def start_once():
                 log("companies: no key, so the warm-up is skipped (nothing would drain the queue)")
         except Exception as e:
             log(f"companies worker failed to start (non-fatal): {e}")
+        threading.Thread(target=_size_guards_once, daemon=True, name="size-guards").start()
         threading.Thread(target=_rescore_once, daemon=True, name="rescore").start()
         log(f"tapehawk: started (pid {os.getpid()})")
 

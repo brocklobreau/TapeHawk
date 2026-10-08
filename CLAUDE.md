@@ -268,6 +268,42 @@ big and `recent(min_importance=5)` -- the rail -- leaves it out; a row
 with no exchange stored passes as before). Found 2026-10-07 while fixing
 the review: the scorer's verdict never reached the stored row.
 
+**Size guards (2026-10-07, evening).** The size cache looks a ticker up by
+its bare symbol, and the wires' tickers collide with dead or re-used US
+symbols: Novartis's release (SIX: NOVN) was sized as "Novan, Inc." ($2.6M, a
+delisted biotech FMP still answers for) and a 7 became an 8; Parabolic's
+(PARA) was sized as "Banzai International". Three guards, all applied in
+`store.size_from(comp, text, symbol, reasons, log)` -- the one door for
+`wires.article` and the re-scorers (without the text it answers as before):
+(a) a non-US exchange tag in the headline + paragraph/summary naming this
+ticker (`classify.exchange_tags` / `non_us_tag`: SIX, TSX, LSE, ASX,
+Euronext ..., OTCQB, Pink ...) wins -- the row's `exchange` is that tag, FMP
+is not consulted, and `exchange_verdict` makes it not big ("not US-listed
+(SIX)"); a ticker also tagged under a US exchange passes; (b) FMP's company
+must be the release's company: `classify.name_matches(fmp_name, text)` drops
+the suffix words (`NAME_SUFFIXES`: inc, corp, holdings, class, a, the,
+international, therapeutics ...) and punctuation and needs the first word
+left ("boeing", "banzai", "hims") as a whole word in the lower-cased text;
+otherwise NO size adjustment (market_cap NULL on the row), the reasons gain
+"size unknown: FMP's PARA is Banzai International, Inc. Class A, not this
+company", logged once per (ticker, name); brand or parent names fail by
+design; (c) `companies._fetch_fmp`: a quote carrying a `timestamp` older
+than `STALE_QUOTE_DAYS` (7) or a price of 0/None is stored as error "stale
+quote" (unsized, retried after a day; applied only when the field is there,
+and a timestamp that is not a number counts as absent: only the price is
+checked, so a format change at FMP can never mark every ticker stale),
+and it re-scores the ticker's rows so a size on file is taken back. At boot
+`app._size_guards_once` runs `store.resize_recent(14)` (re-applies
+`size_from` to every row with a size or exchange stored, re-scores the ones
+whose guard verdict changed -- a size withdrawn or the exchange changed; a
+cap that merely moved is rescore_recent's job, so the log line counts what
+the guards did; one log line) and `store.backfill_dups(14)` (rows in arrival
+order, `created_at`; a row sharing a ticker and half its headline words with an earlier
+row from another source inside `wires.MATCH_WINDOW_S` gets `dup_of`; rows
+already marked and same-source copies are left alone; a row whose date or
+symbols cell cannot be read is skipped, never the whole pass; one log line). Tests:
+`tests/test_sizes.py`.
+
 ## Tabs switched off (2026-10-07)
 
 The owner asked to switch off the tabs not in use -- Halts, SEC Filings and

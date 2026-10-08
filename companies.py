@@ -46,6 +46,8 @@ RATE_PER_MIN = 60              # FMP calls a minute, at most (a ticker can take 
 RESCORE_HOURS = 48             # how far back a fresh size re-scores that ticker's rows
 NO_LISTING = "no US listing"   # the error text when quote AND profile are empty: FMP has no such US ticker
 TRANSIENT = "fetch failed"     # the error text's start when FMP could not be asked
+STALE_QUOTE = "stale quote"    # the error text when the quote is dead: a timestamp older than STALE_QUOTE_DAYS, or no price
+STALE_QUOTE_DAYS = 7           # a quote this old is a delisted ticker FMP still answers for, not a live listing
 
 _lock = threading.Lock()
 _queue = deque()
@@ -174,6 +176,22 @@ def _get(path, symbol):
     return j or None
 
 
+def stale_quote(timestamp, price):
+    """Is a quote with this epoch timestamp and price dead? True when the
+    timestamp is older than STALE_QUOTE_DAYS, or the price is 0 or None. A
+    timestamp that cannot be read as a number (a date string, say) is treated
+    as absent -- only the price is checked -- so a change in FMP's field
+    format can never mark every ticker stale (never invent a verdict)."""
+    ts = _num(timestamp)
+    if ts is None:
+        return not price or price <= 0
+    if ts > 1e11:                                  # milliseconds, in case FMP ever sends them
+        ts /= 1000.0
+    if (_now().timestamp() - ts) > STALE_QUOTE_DAYS * 86400:
+        return True
+    return not price or price <= 0
+
+
 def _fetch_fmp(symbol):
     """One ticker from FMP. Returns {name, market_cap, price, exchange,
     country} or {"error": words}. Quote first; profile when the quote has no
@@ -189,6 +207,12 @@ def _fetch_fmp(symbol):
     q = q or {}
     rec = {"name": q.get("name"), "market_cap": _num(q.get("marketCap")), "price": _num(q.get("price")),
            "exchange": (q.get("exchange") or None), "country": None}
+    # Size guard c (2026-10-07, evening): a dead quote is not a live listing.
+    # Only when the answer carries a timestamp (never invented): one older
+    # than STALE_QUOTE_DAYS, or no price, is "stale quote" -- kept for the
+    # record, unsized, asked again in a day like a "no listing" answer.
+    if q.get("timestamp") is not None and stale_quote(q.get("timestamp"), rec["price"]):
+        return dict(rec, error=STALE_QUOTE)
     if not rec["exchange"]:
         p = _get("profile", symbol)
         if p == 402:
@@ -267,8 +291,8 @@ def process_one(log=print):
         if rec.get("error"):
             _status["errors"] += 1
             _status["last_error"] = f"{sym}: {rec['error']}"
-    # a size, or the answer "no US listing", re-scores the ticker's rows
-    if not rec.get("error") or rec.get("error") == NO_LISTING:
+    # a size, the answer "no US listing", or a stale quote (a size on file is taken back) re-scores the ticker's rows
+    if not rec.get("error") or rec.get("error") in (NO_LISTING, STALE_QUOTE):
         on_sized(sym, log)
     return sym
 

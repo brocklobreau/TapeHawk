@@ -483,19 +483,65 @@ def set_dup(article_id, first_id):
     c.commit()
 
 
-def size_from(comp):
+_mismatch_said = set()         # (symbol, FMP name) pairs already logged once
+
+
+def size_from(comp, text=None, symbol=None, reasons=None, log=print):
     """(market_cap, exchange) to score with from a cached company row: None,
     None when there is no row or the fetch failed; the exchange "NONE" when
     FMP had no US listing for the ticker (that answer counts), so the row is
     never big instead of staying at its un-sized score. The wire path and
-    the re-scorers both read the row through this."""
+    the re-scorers both read the row through this -- it is the one door, so
+    the size guards (2026-10-07, evening) live here too, applied when the
+    row's text (headline + paragraph or summary) and ticker are given:
+
+      a. a non-US exchange tag naming this ticker in the text ("(SIX:
+         NOVN)") wins: the exchange is that tag, FMP's answer is not
+         consulted, and the row can never be big;
+      b. FMP's company must be the release's company: when the name's key
+         word (classify.name_matches) is not in the text the size is not
+         trusted -- no adjustment, and `reasons` (a list, when given) gains
+         "size unknown: FMP's PARA is Banzai International, Inc. Class A,
+         not this company"; logged once per (ticker, name);
+      c. a dead quote (companies.py stores it as error "stale quote") is an
+         error row like any other: no adjustment.
+
+    Without the text the answer is what it was before the guards."""
+    sym = str(symbol or "").upper().strip()
+    if text and sym:
+        tag = classify.non_us_tag(text, sym)
+        if tag:
+            return None, tag
     if not comp:
         return None, None
     if comp.get("error"):
         if comp.get("exchange") == classify.NO_LISTING:
             return None, classify.NO_LISTING
         return None, None
+    if text and sym:
+        name = comp.get("name")
+        if not classify.name_matches(name, text):
+            if name:
+                words = f"size unknown: FMP's {sym} is {name}, not this company"
+            else:
+                words = f"size unknown: FMP gave no company name for {sym}"
+            if reasons is not None and words not in reasons:
+                reasons.append(words)
+            key = (sym, str(name or ""))
+            if key not in _mismatch_said:
+                _mismatch_said.add(key)
+                try:
+                    log(f"companies: {words} (its size is not used)")
+                except Exception:
+                    pass
+            return None, None
     return comp.get("market_cap"), comp.get("exchange")
+
+
+def row_text(headline, summary=None):
+    """What the size guards read: the headline plus the row's paragraph or
+    summary (an RSS description names the exchange tag too)."""
+    return f"{headline or ''} {summary or ''}".strip()
 
 
 def company(symbol):
@@ -556,8 +602,10 @@ def _rescore_rows(c, rows, score_fn, noise_fn=None, sizes=None):
                 if first not in sizes:
                     sizes[first] = company(first)
                 comp = sizes[first]
-            mc, ex = size_from(comp)
+            notes = []
+            mc, ex = size_from(comp, row_text(r["headline"], r["summary"]), first, notes)
             imp = score_fn(r["headline"], syms, cats, market_cap=mc, exchange=ex)
+            imp["reasons"] = list(imp.get("reasons") or []) + notes
             new_noise = None
             if noise_fn is not None:
                 new_noise = 1 if noise_fn(r["headline"]) else 0
@@ -587,7 +635,7 @@ def rescore_symbol(symbol, hours=48, score_fn=None):
         return 0
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     c = _conn()
-    rows = c.execute("SELECT id, headline, symbols, categories, importance, is_noise FROM headlines "
+    rows = c.execute("SELECT id, headline, summary, symbols, categories, importance, is_noise FROM headlines "
                      "WHERE symbols LIKE ? AND created_at > ?", (f'%"{sym}"%', since)).fetchall()
     if not rows:
         return 0
@@ -618,7 +666,7 @@ def rescore_recent(days=30, score_fn=None, log=print, noise_fn=None, batch=200, 
     last_err = None
     last_id = 0
     while True:
-        rows = c.execute("SELECT id, headline, symbols, categories, importance, is_noise FROM headlines "
+        rows = c.execute("SELECT id, headline, summary, symbols, categories, importance, is_noise FROM headlines "
                          "WHERE created_at > ? AND id > ? ORDER BY id LIMIT ?", (since, last_id, int(batch))).fetchall()
         if not rows:
             break
@@ -634,6 +682,113 @@ def rescore_recent(days=30, score_fn=None, log=print, noise_fn=None, batch=200, 
     tail = f"; {skipped} skipped (last: {last_err})" if skipped else ""
     log(f"store: re-scored {total} row(s) from the last {days} days; {changed} changed importance, {noise} turned noise{tail}")
     return {"rows": total, "changed": changed, "noise": noise, "skipped": skipped, "last_error": last_err}
+
+
+# --- Size guards (2026-10-07, evening): re-check the sizes on file, mark the old dups ---
+
+def resize_recent(days=14, score_fn=None, log=print, batch=200, pause_s=0.25):
+    """Re-apply size_from WITH the guards to every row sized in the last
+    `days` (market_cap or exchange set) and re-score the ones whose guard
+    verdict changed (a size withdrawn or given back, or another exchange; a
+    cap that merely moved is left to rescore_recent, so the boot log line
+    counts what the guards did): Novartis's 8, sized as Novan, goes back to 7 (no size) or lower
+    (the SIX tag makes it not big) within a minute of the deploy, without
+    waiting for the worker. Same batches and pauses as rescore_recent. Tone
+    and impact untouched. Returns {rows, resized, changed, skipped, last_error}
+    and logs one line with the counts."""
+    if score_fn is None:
+        score_fn = classify.importance
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    c = _conn()
+    sizes = {}
+    total = resized = changed = skipped = 0
+    last_err = None
+    last_id = 0
+    while True:
+        rows = c.execute("SELECT id, headline, summary, symbols, categories, importance, is_noise, market_cap, exchange "
+                         "FROM headlines WHERE created_at > ? AND id > ? AND (market_cap IS NOT NULL OR exchange IS NOT NULL) "
+                         "ORDER BY id LIMIT ?", (since, last_id, int(batch))).fetchall()
+        if not rows:
+            break
+        todo = []
+        for r in rows:
+            total += 1
+            try:
+                syms = json.loads(r["symbols"] or "[]")
+                first = str(syms[0]).upper() if syms else None
+                if first and first not in sizes:
+                    sizes[first] = company(first)
+                mc, ex = size_from(sizes.get(first), row_text(r["headline"], r["summary"]), first)
+                if (mc is None) != (r["market_cap"] is None) or ex != r["exchange"]:   # a guard verdict changed; a refreshed cap is rescore_recent's job
+                    todo.append(r)
+            except Exception as e:
+                skipped += 1
+                last_err = f"#{r['id']}: {str(e)[:80]}"
+        if todo:
+            ch, _, sk, err = _rescore_rows(c, todo, score_fn, None, sizes)
+            c.commit()
+            resized += len(todo) - sk; changed += ch; skipped += sk
+            last_err = err or last_err
+        last_id = rows[-1]["id"]
+        if len(rows) < batch:
+            break
+        if pause_s:
+            time.sleep(pause_s)
+    tail = f"; {skipped} skipped (last: {last_err})" if skipped else ""
+    log(f"store: size guards checked {total} sized row(s) from the last {days} days; "
+        f"{resized} lost or changed their size, {changed} changed importance{tail}")
+    return {"rows": total, "resized": resized, "changed": changed, "skipped": skipped, "last_error": last_err}
+
+
+def backfill_dups(days=14, window_s=None, overlap=None, log=print):
+    """Mark the duplicates already on file: for the last `days` of rows in
+    arrival order, a row that shares a ticker with an EARLIER row from a DIFFERENT
+    source within `window_s` (wires.MATCH_WINDOW_S) and shares at least
+    `overlap` (wires.COPY_OVERLAP) of its headline words gets dup_of = that
+    earlier row's id, so the first arrival keeps the rail. Rows already
+    marked (dup_of) and same-source copies (copy_of) are left alone. Runs
+    once per boot; one pass over the window, one log line with the count."""
+    import wires                                   # for the two constants and the word rule; no thread starts here
+    window_s = wires.MATCH_WINDOW_S if window_s is None else window_s
+    overlap = wires.COPY_OVERLAP if overlap is None else overlap
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    c = _conn()
+    # arrival order: created_at is the arrival clock (ids agree with it in production; a test's back-dated rows do not)
+    rows = c.execute("SELECT id, created_at, source, symbols, headline, dup_of, copy_of FROM headlines "
+                     "WHERE created_at > ? ORDER BY created_at, id", (since,)).fetchall()
+    recent = []                                    # (ts, source, symbols, tokens, id) of the rows seen so far
+    marked = 0
+    for r in rows:
+        try:
+            ts = datetime.fromisoformat(str(r["created_at"]))
+            ts = (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)).timestamp()
+            syms = {str(s).upper() for s in json.loads(r["symbols"] or "[]") if s}
+            toks = wires._tokens(r["headline"])
+        except (TypeError, ValueError):
+            continue                               # one unreadable row (a bad date or symbols cell) is skipped, not the whole pass
+        me = (ts, r["source"], syms, toks, r["id"])
+        original = r["dup_of"] is None and r["copy_of"] is None
+        if original and syms:
+            best = None
+            for other in reversed(recent):
+                if ts - other[0] > window_s:
+                    break
+                if ts < other[0] or other[1] == r["source"] or not (other[2] & syms):
+                    continue                       # only an EARLIER row from another source can be the first
+                j = len(other[3] & toks) / max(1, len(other[3] | toks))
+                if j >= overlap and (best is None or j > best[1]):
+                    best = (other, j)
+            if best is not None:
+                c.execute("UPDATE headlines SET dup_of = ? WHERE id = ?", (best[0][4], r["id"]))
+                marked += 1
+                original = False
+        if original:
+            recent.append(me)                      # only first arrivals are matched against: a dup points at the original
+        while recent and ts - recent[0][0] > window_s:
+            recent.pop(0)
+    c.commit()
+    log(f"store: {marked} earlier row(s) from the last {days} days marked as another source's copy (dup_of)")
+    return marked
 
 
 def ungraded(cutoff_iso, limit=25):

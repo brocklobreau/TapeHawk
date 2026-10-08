@@ -407,9 +407,15 @@ class Source(threading.Thread):
         # Big News rules (2026-10-07): the company's size, from the cache
         # only (companies.size_of never fetches; a ticker it does not know
         # is queued for the worker, and the row is re-scored when it lands).
-        comp = companies.size_of(it["tickers"][0]) if it["tickers"] else None
-        market_cap, exchange = store.size_from(comp)       # "no US listing" counts as an answer: exchange NONE
+        # Size guards (2026-10-07, evening): a non-US tag in the text wins,
+        # and FMP's company must be named in the release; both are checked in
+        # store.size_from (sqlite and text only; nothing here waits).
+        first = it["tickers"][0] if it["tickers"] else None
+        comp = companies.size_of(first) if first else None
+        notes = []
+        market_cap, exchange = store.size_from(comp, store.row_text(headline, it["description"]), first, notes, log=self.log)
         imp = classify.importance(headline, it["tickers"], cats, market_cap=market_cap, exchange=exchange)
+        imp["reasons"] = list(imp["reasons"]) + notes
         companies.note(it["tickers"][1:])
         tn = classify.tone(headline)
         ip = classify.impact(headline, it["tickers"])
